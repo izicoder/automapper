@@ -1,0 +1,30 @@
+#TITLE:Per Chart Timing;
+#ARTIST:Fixture;
+#CREDIT:tester;
+#MUSIC:song.mp3;
+#VERSION:0.83;
+#OFFSET:0.1;
+#BPMS:0=120;
+#NOTEDATA:;
+#STEPSTYPE:dance-single;
+#DIFFICULTY:Easy;
+#METER:3;
+#CREDIT:tester;
+#OFFSET:-0.25;
+#NOTES:
+1000
+,
+0001
+;
+#SECTION:Second chart;
+#NOTEDATA:;
+#STEPSTYPE:dance-single;
+#DIFFICULTY:Hard;
+#METER:8;
+#OFFSET:0;
+#BPMS:0=180;
+#NOTES:
+1000
+,
+0001
+;

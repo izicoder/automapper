@@ -1,0 +1,19 @@
+#TITLE:Zero Offset;
+#ARTIST:Fixture;
+#CREDIT:tester;
+#MUSIC:song.mp3;
+#OFFSET:0;
+#BPMS:0=120;
+#NOTES:
+     dance-single:
+     :
+     Easy:
+     3:
+     :
+     0,0,0,0,0:
+1000
+0001
+,
+0001
+1000
+;

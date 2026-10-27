@@ -1,0 +1,15 @@
+#TITLE:Missing Audio File;
+#ARTIST:Fixture;
+#CREDIT:tester;
+#MUSIC:this-file-does-not-exist.mp3;
+#OFFSET:0;
+#BPMS:0=120;
+#NOTES:
+     dance-single:
+     :
+     Easy:
+     3:
+     :
+     0,0,0,0,0:
+1000
+;

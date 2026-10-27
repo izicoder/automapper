@@ -1,0 +1,22 @@
+#TITLE:BPM Change And Stop;
+#ARTIST:Fixture;
+#CREDIT:tester;
+#MUSIC:song.mp3;
+#OFFSET:0;
+#BPMS:0=120,4=60;
+#STOPS:2=0.25;
+#NOTES:
+     dance-single:
+     :
+     Hard:
+     7:
+     :
+     0,0,0,0,0:
+1000
+1000
+1000
+1000
+,
+1000
+1000
+;

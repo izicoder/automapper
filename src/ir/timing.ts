@@ -3,8 +3,8 @@ import type { BpmChange, TempoMap } from "./types.js";
 
 interface Segment {
   startBeat: Beat;
-  /** Exact beat offset where the next segment starts. */
-  endBeat: Beat;
+  /** Exact beat offset where the next segment starts. Omitted on the last one. */
+  endBeat?: Beat;
   bpm: number;
   /** Absolute ms at startBeat, including every pause before it. */
   startMs: number;
@@ -126,7 +126,8 @@ export class TimingMap {
     // A delay on the beat happens before the note on that beat.
     const delayIndex = includeDelaysAtBeat ? lastIndexAtOrBefore(this.delays, beat) : lastIndexStrictlyBefore(this.delays, beat);
     if (delayIndex >= 0) total += this.delays[delayIndex]!.sum;
-    return total;
+    // Pauses are stored in seconds; the timeline is milliseconds.
+    return total * 1000;
   }
 
   private findSegment(beat: Beat): Segment | undefined {
@@ -156,27 +157,18 @@ export class TimingMap {
     const segments: Segment[] = [];
     let ms = -offsetSeconds * 1000;
 
-    for (let index = 0; index < boundaries.length - 1; index += 1) {
+    for (let index = 0; index < boundaries.length; index += 1) {
       const startBeat = boundaries[index]!;
-      const endBeat = boundaries[index + 1]!;
+      const endBeat = boundaries[index + 1];
       const bpm = bpmAtChange(bpmChanges, startBeat);
       const warped = this.isInsideWarp(startBeat);
       segments.push({ startBeat, endBeat, bpm, startMs: ms, warped });
-      if (!warped) {
+      // The last segment runs to the end of the song: no time to add.
+      if (endBeat !== undefined && !warped) {
         ms += (toNumber(endBeat) - toNumber(startBeat)) * (60000 / bpm);
       }
     }
 
-    if (segments.length === 0) {
-      const bpm = bpmChanges[0]!.bpm;
-      segments.push({
-        startBeat: { n: 0, d: 1 },
-        endBeat: { n: Number.MAX_SAFE_INTEGER, d: 1 },
-        bpm,
-        startMs: ms,
-        warped: false,
-      });
-    }
     return segments;
   }
 }
