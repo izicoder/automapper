@@ -1,0 +1,19 @@
+#TITLE:Comments In Note Data;
+#ARTIST:Fixture;
+#CREDIT:tester;
+#MUSIC:song.mp3;
+#OFFSET:0;
+#BPMS:0=120;
+#NOTES:
+     dance-single:
+     :
+     Easy:
+     3:
+     :
+     0,0,0,0,0:  // radar values, then the note data below
+1000  // first row
+0001
+,  // measure 2 starts here
+0001
+1000
+;

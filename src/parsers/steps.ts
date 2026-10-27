@@ -115,9 +115,11 @@ export function parseNoteData(text: string, columnCount: number): { notes: Parse
   };
 
   for (const rawLine of lines) {
-    const line = rawLine.trim();
+    // StepMania allows comments anywhere, including on the measure separator
+    // (",  // measure 2") and after a row. Cut them before parsing.
+    const comment = rawLine.indexOf("//");
+    const line = (comment >= 0 ? rawLine.slice(0, comment) : rawLine).trim();
     if (line.length === 0) continue;
-    if (line.startsWith("//")) continue;
     if (line === ",") {
       flushMeasure();
       continue;

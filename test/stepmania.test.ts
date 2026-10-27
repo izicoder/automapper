@@ -90,6 +90,13 @@ describe("StepMania song loader", () => {
     expect(times(hard)[1]).toBeCloseTo(1333.333, 3);
   });
 
+  it("reads a chart whose note data carries comments", () => {
+    const outcome = loadStepManiaSong(fixture("comments"));
+    expect(outcome.reason).toBeUndefined();
+    expect(outcome.warnings).toEqual([]);
+    expect(times(outcome.song!.charts[0]!)).toEqual([0, 1000, 2000, 3000]);
+  });
+
   it("skips a song without audio", () => {
     const outcome = loadStepManiaSong(fixture("no-audio"));
     expect(outcome.song).toBeNull();

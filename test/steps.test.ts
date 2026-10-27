@@ -18,6 +18,29 @@ describe("StepMania note data", () => {
     expect(notes.map((note) => note.beat.n / note.beat.d)).toEqual([0, 0.5, 2]);
   });
 
+  it("ignores measure separators and rows with comments", () => {
+    const data = [
+      "// a leading comment",
+      "1000  // first row",
+      "0001",
+      ",  // measure 2",
+      "1000",
+      "0000 // trailing",
+      ",",
+      "0100",
+    ].join("\n");
+
+    const { notes, warnings } = parseNoteData(data, 4);
+
+    expect(warnings).toEqual([]);
+    expect(notes.map((note) => [note.beat.n / note.beat.d, note.column])).toEqual([
+      [0, 0],
+      [2, 3],
+      [4, 0],
+      [8, 1],
+    ]);
+  });
+
   it("reads holds and rolls with their length", () => {
     const { notes } = parseNoteData("2000\n0000\n0000\n3000\n,\n4000\n0000\n0000\n3000\n", 4);
     expect(notes).toHaveLength(2);
