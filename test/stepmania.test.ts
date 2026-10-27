@@ -144,6 +144,19 @@ describe("StepMania song loader", () => {
     expect(outcome.warnings.some((line) => line.includes('unknown step type "made-up-type"'))).toBe(true);
   });
 
+  it("drops a chart that a folder holds twice (.sm and .ssc copies)", () => {
+    const outcome = loadStepManiaSong(fixture("duplicate-charts"));
+    const song = outcome.song!;
+
+    // Hard exists in both files, so only the .ssc copy survives; Easy is only
+    // in the .sm, so it is kept.
+    expect(song.charts.map((chart) => chart.meta.name)).toEqual(["Hard", "Easy"]);
+    expect(times(song.charts[0]!)).toEqual([0, 500, 1000, 1500]);
+    expect(
+      outcome.warnings.some((line) => line.includes('song.sm: duplicate of chart "Hard" in song.ssc')),
+    ).toBe(true);
+  });
+
   it("returns a reason for a folder without chart files", () => {
     const outcome = loadStepManiaSong(fixture(""));
     expect(outcome.song).toBeNull();

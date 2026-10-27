@@ -285,13 +285,30 @@ export function buildCharts(
     charts.push(result.chart);
   }
 
+  // One difficulty per key count and name (osu! names difficulties by that
+  // pair). A chart the source already has wins over an automapped twin, and
+  // two sources landing on the same count and name keep only the first.
+  const sources = [...charts];
+  const taken = new Set(charts.map((chart) => `${chart.keyCount}|${chart.meta.name}`));
+
   for (const target of options.keys) {
-    for (const chart of charts) {
+    for (const chart of sources) {
       if (target === chart.keyCount) continue; // identity conversion is the source chart
+
+      const key = `${target}|${chart.meta.name}`;
+      if (taken.has(key)) {
+        logger.warn(
+          `${chart.meta.name}: ${target}K version already exists, automapped one skipped`,
+          label,
+        );
+        continue;
+      }
+
       const result = automapChart(chart, target);
       for (const warning of result.warnings) {
         logger.warn(`${chart.meta.name}: ${warning}`, label);
       }
+      taken.add(key);
       charts.push(result.chart);
     }
   }

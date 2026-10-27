@@ -13,6 +13,11 @@ export const CHART_EXTENSIONS = new Set([".sm", ".ssc"]);
 export const AUDIO_EXTENSIONS = new Set([".mp3", ".ogg", ".wav", ".flac", ".m4a", ".aac"]);
 export const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]);
 
+/** Orders chart files so .ssc is read before .sm. */
+function extensionRank(file: string): number {
+  return extname(file).toLowerCase() === ".ssc" ? 0 : 1;
+}
+
 export interface LoadOutcome {
   /** Null when the folder cannot become a song at all (no chart, no audio). */
   song: Song | null;
@@ -61,7 +66,9 @@ export function loadStepManiaSong(songDir: string, options: LoadOptions = {}): L
   const files = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
   const chartFiles = (options.chartFile === undefined ? files : [options.chartFile])
     .filter((file) => CHART_EXTENSIONS.has(extname(file).toLowerCase()))
-    .sort((a, b) => a.localeCompare(b));
+    // .ssc before .sm: when a folder holds both copies of the same song, the
+    // newer format wins and the .sm copy is the one dropped as a duplicate.
+    .sort((a, b) => extensionRank(a) - extensionRank(b) || a.localeCompare(b));
 
   if (chartFiles.length === 0) {
     return { song: null, warnings, reason: "no .sm or .ssc chart file" };
@@ -70,7 +77,8 @@ export function loadStepManiaSong(songDir: string, options: LoadOptions = {}): L
   const folderName = songDir.split(/[\\/]/).filter(Boolean).pop() ?? songDir;
   let songTags: MsdTag[] | undefined;
   const charts: Chart[] = [];
-  const seen = new Set<string>();
+  /** One chart per key count and name -> the file it came from. */
+  const seen = new Map<string, string>();
 
   for (const file of chartFiles) {
     const decoded = decodeChartFile(join(songDir, file));
@@ -80,15 +88,18 @@ export function loadStepManiaSong(songDir: string, options: LoadOptions = {}): L
     songTags ??= parsed.tags;
 
     for (const raw of parsed.charts) {
-      const duplicateKey = `${raw.stepType}|${raw.difficulty}|${raw.meter}|${raw.noteData}`;
-      if (seen.has(duplicateKey)) {
-        warnings.push(`${file}: duplicate chart "${raw.difficulty}" skipped`);
-        continue;
-      }
-
       const chart = buildChart(raw, file, warnings, options.assumeKeys);
       if (chart === null) continue;
-      seen.add(duplicateKey);
+
+      const identity = chartIdentity(chart);
+      const firstFile = seen.get(identity);
+      if (firstFile !== undefined) {
+        warnings.push(
+          `${file}: duplicate of chart "${chart.meta.name}" in ${firstFile}, skipped`,
+        );
+        continue;
+      }
+      seen.set(identity, file);
       charts.push(chart);
     }
   }
@@ -268,6 +279,15 @@ function metadataFromTags(tags: MsdTag[]): SongMetadata {
       .filter((tag) => tag.length > 0),
     previewTimeMs: Number.isFinite(sampleStart) ? Math.round(sampleStart * 1000) : null,
   };
+}
+
+/**
+ * Identity of a difficulty the way osu! sees it: key count plus name. A folder
+ * that ships both .sm and .ssc copies (or repeats a #NOTES block) would
+ * otherwise import the same difficulty twice.
+ */
+function chartIdentity(chart: Chart): string {
+  return `${chart.keyCount}|${chart.meta.name}`;
 }
 
 function buildChart(

@@ -41,6 +41,41 @@ function setupPack(): { input: string; output: string } {
   return { input, output };
 }
 
+/** A tiny in-memory chart, enough for buildCharts() to work on. */
+function testChart(keyCount: number, name: string): Chart {
+  const notes = Array.from({ length: keyCount }, (_, index) => ({
+    column: index,
+    beat: beat(index),
+    ms: index * 100,
+    kind: "tap" as const,
+  }));
+  return {
+    keyCount,
+    meta: { name, stepType: "dance-single", meter: 5 },
+    timing: {
+      offsetSeconds: 0,
+      bpm: [{ beat: beat(0), bpm: 120 }],
+      stops: [],
+      delays: [],
+      warps: [],
+    },
+    notes,
+    backgroundEvents: [],
+    sourceText: `${keyCount}K ${name}`,
+  };
+}
+
+function songWithCharts(charts: Chart[]): Song {
+  return {
+    folderName: "multi",
+    directory: "multi",
+    metadata: { title: "Multi", artist: "Fixture", tags: [], previewTimeMs: null },
+    assets: { audio: "song.mp3" },
+    charts,
+    warnings: [],
+  };
+}
+
 /** Builds a .zip whose entries are `folder/<files of the fixture>`. */
 function zipFixtureSong(zipPath: string, folder: string, fixture: string): void {
   const entries: Record<string, Uint8Array> = {};
@@ -209,6 +244,38 @@ describe("CLI end to end (spec sections 5, 7 and 11)", () => {
     const files = readdirSync(join(dirs.output, "Demo Pack")).sort();
     const archive = unzipSync(readFileSync(join(dirs.output, "Demo Pack", files[0]!)));
     expect(Object.keys(archive).filter((name) => name.endsWith(".osu"))).toHaveLength(1);
+  });
+
+  it("uses a source chart that already has the requested key count", () => {
+    const { logger, lines } = createTestLogger();
+    const charts = buildCharts(
+      songWithCharts([testChart(4, "Hard"), testChart(6, "Hard")]),
+      { ...DEFAULT_OPTIONS, keys: [6] },
+      logger,
+      "both",
+    );
+
+    expect(charts.map((chart) => `${chart.keyCount}K ${chart.meta.name}`)).toEqual([
+      "4K Hard",
+      "6K Hard",
+    ]);
+    expect(lines.some((line) => line.includes("6K version already exists"))).toBe(true);
+  });
+
+  it("writes one automapped difficulty when two sources land on the same name", () => {
+    const { logger } = createTestLogger();
+    const charts = buildCharts(
+      songWithCharts([testChart(4, "Hard"), testChart(5, "Hard")]),
+      { ...DEFAULT_OPTIONS, keys: [6] },
+      logger,
+      "both",
+    );
+
+    expect(charts.map((chart) => `${chart.keyCount}K ${chart.meta.name}`)).toEqual([
+      "4K Hard",
+      "5K Hard",
+      "6K Hard",
+    ]);
   });
 
   it("rejects an illegal key count before converting anything", () => {

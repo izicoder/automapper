@@ -156,6 +156,9 @@ and attribution are in `NOTICE`.
 - Absolute ms is computed once from the tempo map at full precision; rounding
   to integer ms happens only in the writer, per note.
 - A bad song is skipped with a log line; it never aborts a pack.
+- One difficulty per key count and name (that pair is the osu! `Version`). A
+  folder holding both `.sm` and `.ssc` copies keeps the `.ssc` chart, and an
+  automapped chart never takes a name the source already has at that key count.
 - Every parser guess (encoding, audio fallback, skipped chart) goes into
   `Song.warnings` and gets logged.
 - Fixtures are small hand-written charts committed under `test/fixtures/`.

@@ -1,0 +1,19 @@
+#VERSION:0.83;
+#TITLE:Dedupe;
+#ARTIST:Fixture;
+#MUSIC:song.mp3;
+#OFFSET:0;
+#BPMS:0=120;
+#NOTEDATA:;
+#STEPSTYPE:dance-single;
+#DESCRIPTION:;
+#DIFFICULTY:Hard;
+#METER:8;
+#RADARVALUES:0,0,0,0,0;
+#NOTES:
+// The same chart as song.sm, written with different spacing.
+1000
+  0100
+0010
+        0001
+;
