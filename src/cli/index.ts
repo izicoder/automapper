@@ -4,9 +4,12 @@ import { join } from "node:path";
 import { Logger } from "../log.js";
 import { discover, type SongEntry } from "../package/layout.js";
 import { packageSong } from "../package/osz.js";
-import { setFileName, setSettingsHash } from "../osu/naming.js";
+import { chartSettingsHash, setFileName, setSettingsHash } from "../osu/naming.js";
 import { ensureInputDir, ensureOutputDir } from "../paths.js";
 import { loadStepManiaSong } from "../parsers/stepmania.js";
+import type { Chart, Song } from "../ir/types.js";
+import { automapChart } from "../transform/automap.js";
+import { nearestLegalKeyCount } from "../keys.js";
 import { CliError, parseArgs, USAGE, type CliOptions } from "./options.js";
 
 export interface RunResult {
@@ -51,13 +54,12 @@ export function run(
   mkdirSync(outputDir, { recursive: true });
   const discovery = discover(inputDir);
 
-  warnAboutUnimplementedOptions(options, logger);
-
   const settings: Record<string, unknown> = {
     keys: options.keys,
     minHoldBeats: options.minHoldBeats,
     stopEmulation: options.stopEmulation,
     rollAsTaps: options.rollAsTaps,
+    rollTapBeats: options.rollTapBeats,
     seed: options.seed,
   };
 
@@ -106,39 +108,83 @@ function convertSong(
   }
 
   const song = outcome.song;
-  const setHash = setSettingsHash(song, settings);
-  const outputPath = join(outputDir, setFileName(song, setHash));
 
-  const written = packageSong(song, {
-    versionHash: setHash,
-    creator: song.metadata.credit ?? "converted",
-    audioFileName: song.assets.audio,
-    minHoldBeats: options.minHoldBeats,
-    outputPath,
-  });
+  try {
+    const charts = buildCharts(song, options, logger, entry.label);
+    const outputPath = join(outputDir, setFileName(song, setSettingsHash(song, settings)));
 
-  for (const version of written.versions) logger.info(`${version} -> ${outputPath}`, entry.label);
-  return { converted: 1, failed: 0 };
+    const written = packageSong(song, charts, {
+      creator: song.metadata.credit ?? "converted",
+      audioFileName: song.assets.audio,
+      minHoldBeats: options.minHoldBeats,
+      rollAsTaps: options.rollAsTaps,
+      rollTapBeats: options.rollTapBeats,
+      stopEmulation: options.stopEmulation,
+      outputPath,
+      hashForChart: (chart) => chartSettingsHash(song, chart, settings),
+    });
+
+    for (const version of written.versions) logger.info(`${version} -> ${outputPath}`, entry.label);
+    return { converted: 1, failed: 0 };
+  } catch (error) {
+    // One broken song must never abort a pack (spec section 5).
+    logger.error(`skipped: ${(error as Error).message}`, entry.label);
+    return { converted: 0, failed: 1 };
+  }
+}
+
+/** Source difficulties plus one automapped difficulty per requested key count. */
+export function buildCharts(
+  song: Song,
+  options: CliOptions,
+  logger: Logger,
+  label: string,
+): Chart[] {
+  // A source key count outside osu!mania's range is mapped to the nearest
+  // legal one; the input chart itself is always accepted (spec section 5).
+  const charts: Chart[] = [];
+  for (const chart of song.charts) {
+    const legal = nearestLegalKeyCount(chart.keyCount);
+    if (legal === chart.keyCount) {
+      charts.push(chart);
+      continue;
+    }
+
+    const result = automapChart(chart, legal);
+    for (const warning of result.warnings) logger.warn(`${chart.meta.name}: ${warning}`, label);
+    logger.warn(
+      `${chart.meta.name}: ${chart.keyCount}K is not an osu!mania key count, mapped to ${legal}K`,
+      label,
+    );
+    charts.push(result.chart);
+  }
+
+  for (const target of options.keys) {
+    for (const chart of charts) {
+      if (target === chart.keyCount) continue; // identity conversion is the source chart
+      const result = automapChart(chart, target);
+      for (const warning of result.warnings) {
+        logger.warn(`${chart.meta.name}: ${warning}`, label);
+      }
+      charts.push(result.chart);
+    }
+  }
+
+  return charts;
+}
+
+/** Turns an automapper warning into a log line without losing the chart name. */
+export function logAutomapWarnings(
+  warnings: readonly string[],
+  chartName: string,
+  logger: Logger,
+  context?: string,
+): void {
+  for (const warning of warnings) logger.warn(`${chartName}: ${warning}`, context);
 }
 
 function safeName(name: string): string {
   return name.replace(/[<>:"/\\|?*]/g, "").trim() || "pack";
-}
-
-/**
- * Options the spec requires but that are not wired up yet. Saying so out loud
- * is better than accepting a flag and silently doing nothing with it.
- */
-function warnAboutUnimplementedOptions(options: CliOptions, logger: Logger): void {
-  if (options.keys.length > 0) {
-    logger.warn("--keys is not implemented yet, converting at the source key count");
-  }
-  if (options.stopEmulation) {
-    logger.warn("--stop-emulation is not implemented yet, stops only shift note times");
-  }
-  if (options.rollAsTaps) {
-    logger.warn("--roll-taps is not implemented yet, rolls become holds");
-  }
 }
 
 /** Entry point: runs the conversion and sets the exit code (spec section 11). */

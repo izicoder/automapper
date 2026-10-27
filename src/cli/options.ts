@@ -1,11 +1,16 @@
+import { MAX_KEY_COUNT, MIN_KEY_COUNT } from "../keys.js";
+
 export interface CliOptions {
   /** Target key counts, empty means "convert only". */
   keys: number[];
   /** Holds shorter than this in beats become taps. */
   minHoldBeats: number;
-  /** Emulates stops with a near-zero SV line (spec section 6). */
+  /** Emulates stops with near-zero SV lines (spec section 6). */
   stopEmulation: boolean;
+  /** Rolls become a series of taps (spec section 8). */
   rollAsTaps: boolean;
+  /** Distance between those taps, in beats. */
+  rollTapBeats: number;
   seed: number;
   verbose: boolean;
   help: boolean;
@@ -16,6 +21,7 @@ export const DEFAULT_OPTIONS: CliOptions = {
   minHoldBeats: 1 / 32,
   stopEmulation: false,
   rollAsTaps: false,
+  rollTapBeats: 0.25,
   seed: 0,
   verbose: false,
   help: false,
@@ -51,6 +57,10 @@ export function parseArgs(argv: readonly string[]): CliOptions {
         options.minHoldBeats = parseNumber(next(), arg);
         if (options.minHoldBeats < 0) throw new CliError(`${arg} must not be negative`);
         break;
+      case "--roll-subdivision":
+        options.rollTapBeats = parseNumber(next(), arg);
+        if (!(options.rollTapBeats > 0)) throw new CliError(`${arg} must be greater than 0`);
+        break;
       case "--stop-emulation":
         options.stopEmulation = true;
         break;
@@ -72,12 +82,20 @@ export function parseArgs(argv: readonly string[]): CliOptions {
   return options;
 }
 
+/** osu!mania key counts, from 1K to 18K (10K+ are dual-stage / Co-Op). */
 function parseKeys(text: string): number[] {
-  const keys = text
-    .split(",")
-    .map((part) => Number(part.trim()))
-    .filter((value) => Number.isInteger(value) && value >= 1 && value <= 18);
-  if (keys.length === 0) throw new CliError(`--keys needs a list like 4 or 4,7`);
+  const keys: number[] = [];
+
+  for (const part of text.split(",")) {
+    const value = Number(part.trim());
+    if (!Number.isInteger(value) || value < MIN_KEY_COUNT || value > MAX_KEY_COUNT) {
+      throw new CliError(
+        `--keys needs whole numbers from ${MIN_KEY_COUNT} to ${MAX_KEY_COUNT}, got "${part.trim()}"`,
+      );
+    }
+    keys.push(value);
+  }
+
   return [...new Set(keys)];
 }
 
@@ -93,12 +111,14 @@ Usage:
   converter [options]
 
 Options:
-  --keys <list>         also generate automapped difficulties (e.g. 4,7)
-  --min-hold-beats <n>  holds shorter than n beats become taps (default 0.03125)
-  --stop-emulation      emulate stops with a near-zero SV line
-  --roll-taps           split rolls into a series of taps
-  --seed <n>            automapper seed, part of the output hash
-  --verbose, -v         show debug lines
-  --help, -h            show this help
+  --keys <list>           also generate automapped difficulties, 1 to 18 keys
+                          (e.g. 4 or 2,10,18)
+  --min-hold-beats <n>    holds shorter than n beats become taps (default 0.03125)
+  --roll-taps             split rolls into a series of taps
+  --roll-subdivision <n>  distance between those taps in beats (default 0.25)
+  --stop-emulation        emulate stops with a near-zero SV line
+  --seed <n>              automapper seed, part of the output hash
+  --verbose, -v           show debug lines
+  --help, -h              show this help
 
 Everything in INPUT/ is converted into OUTPUT/, both next to the program.`;

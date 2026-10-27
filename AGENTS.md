@@ -38,7 +38,14 @@ src/
     msd.ts        StepMania `#TAG:value;` scanner.
     chart-types.ts Step step type -> osu key count table.
     steps.ts      StepMania note data (measures, holds, rolls, mines...).
-  transform/      Automapper (key count N -> M). Not written yet.
+  transform/      Automapper (key count N -> M).
+    automap.ts    Public entry: IR chart -> IR chart at the target key count.
+    rizu/         Port of rizu vsrg's key conversion (GPL-3.0, see NOTICE).
+      preprocess.ts NotePreprocessor: lines, lanes, neighbour links.
+      blocks.ts     BlockFinder + NoteBlock: repeated patterns as one unit.
+      reduce.ts     N > M: line overlap, note counts, column balance, LN trim.
+      expand.ts     N < M: SolutionSeeker + NextUpscaler, lanes without new notes.
+      enps.ts       Exponential density used by the line balancer.
   osu/            Beatmap writer. Never knows about source formats.
     writer.ts     Song + chart -> .osu text (timing points, hit objects).
     note-mapping.ts Spec section 8 rules: what becomes a tap, an LN, or nothing.
@@ -59,10 +66,36 @@ OUTPUT/           Everything the tool produces. Git-ignored.
 
 ## Status
 
-Done: StepMania parsing, timing, IR, osu writer, .osz packaging, CLI, tests.
-Not done yet (spec v1): automapper (`--keys`), stop emulation (`--stop-emulation`),
-roll-as-taps (`--roll-taps`), BMS input (v1.1), UI. The CLI logs a warning when
-one of the unfinished options is passed rather than silently ignoring it.
+Done: StepMania parsing, timing, IR, osu writer, .osz packaging, automapper
+(1K-18K, ported from rizu), stop emulation, roll-as-taps, CLI, tests.
+
+Automapper specifics:
+
+- N > M uses rizu's `Reductor` chain; N < M uses `NextUpscaler`. The identity
+  case (N = M) keeps the source chart and is not duplicated.
+- Both sides work in whole milliseconds, like rizu and like osu.
+- The upscaler spreads existing notes only; it never invents any. A 1K source
+  therefore stays in the leftmost column.
+- osu!mania key counts run 1K-18K; 10K and above are normally dual-stage or
+  Co-Op layouts but use the same `CircleSize`.
+- Input charts may sit outside that range: they are automapped to the closest
+  legal count and logged. `--keys` only accepts 1K-18K, and every written
+  difficulty is legal (`src/keys.ts`, enforced by the writer).
+
+Not done yet: BMS input and keysounds (spec v1.1), UI (spec v1.1), separate
+.osz per automapped difficulty (allowed by spec section 5, not asked for yet).
+Scratch lanes and rizu's other modifiers are out of scope.
+
+## Licensing
+
+The project is GPL-3.0 (see `LICENSE`). The automapper is a TypeScript port of
+rizu vsrg (https://github.com/semyon422/rizu, GPL-3.0); file-by-file mapping
+and attribution are in `NOTICE`.
+
+- Keep the attribution in `NOTICE` and the headers of `src/transform/rizu/`
+  and `src/transform/automap.ts` when touching that code.
+- Do not copy code from rizu modules that are not already ported without
+  checking their license and updating `NOTICE`.
 
 ## Conventions
 

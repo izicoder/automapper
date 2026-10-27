@@ -1,5 +1,7 @@
 import { TimingMap } from "../ir/timing.js";
+import type { Beat } from "../ir/beat.js";
 import type { Chart, Song } from "../ir/types.js";
+import { MAX_KEY_COUNT, MIN_KEY_COUNT } from "../keys.js";
 import { mapNotes, type MappedNote } from "./note-mapping.js";
 
 /** osu identifies an object by content, these stay zero so nothing is online. */
@@ -12,6 +14,12 @@ export interface WriteOptions {
   creator: string;
   audioFileName: string;
   minHoldBeats: number;
+  /** Split rolls into a series of taps (spec section 8). */
+  rollAsTaps: boolean;
+  /** Distance between those taps, in beats. */
+  rollTapBeats: number;
+  /** Emulate stops with near-zero SV lines (spec section 6). */
+  stopEmulation: boolean;
 }
 
 export interface WrittenBeatmap {
@@ -28,8 +36,19 @@ export interface WrittenBeatmap {
  * milliseconds happens here and only here, per line.
  */
 export function writeBeatmap(song: Song, chart: Chart, options: WriteOptions): WrittenBeatmap {
+  if (!Number.isInteger(chart.keyCount) || chart.keyCount < MIN_KEY_COUNT || chart.keyCount > MAX_KEY_COUNT) {
+    throw new Error(
+      `osu!mania supports ${MIN_KEY_COUNT} to ${MAX_KEY_COUNT} keys, chart "${chart.meta.name}" has ${chart.keyCount}`,
+    );
+  }
+
   const timing = new TimingView(chart);
-  const { notes } = mapNotes(chart.notes, { minHoldBeats: options.minHoldBeats });
+  const { notes } = mapNotes(chart.notes, {
+    minHoldBeats: options.minHoldBeats,
+    rollAsTaps: options.rollAsTaps,
+    rollTapBeats: options.rollTapBeats,
+    timeAt: (beat: Beat) => timing.timeAt(beat),
+  });
   const version = `${chart.keyCount}K ${chart.meta.name} #${options.versionHash}`;
 
   const metadata = song.metadata;
@@ -88,11 +107,32 @@ export function writeBeatmap(song: Song, chart: Chart, options: WriteOptions): W
   lines.push("//Storyboard Layer 4 (Timeline)");
   lines.push("");
   lines.push("[TimingPoints]");
+
+  const timingPoints: { ms: number; text: string }[] = [];
   // time, beatLength, meter, sampleSet, sampleIndex, volume, uninherited, effects
   for (const line of timing.redLines()) {
     const beatLength = formatBeatLength(60000 / line.bpm);
-    lines.push(`${Math.round(line.ms)},${beatLength},4,2,0,60,1,0`);
+    timingPoints.push({ ms: line.ms, text: `${Math.round(line.ms)},${beatLength},4,2,0,60,1,0` });
   }
+
+  if (options.stopEmulation) {
+    for (const window of timing.stopWindows()) {
+      // A near-zero SV multiplier freezes the field for the stop, then the
+      // normal speed returns (spec section 6).
+      timingPoints.push({
+        ms: window.startMs,
+        text: `${Math.round(window.startMs)},-10000,4,2,0,60,0,0`,
+      });
+      timingPoints.push({
+        ms: window.endMs,
+        text: `${Math.round(window.endMs)},-100,4,2,0,60,0,0`,
+      });
+    }
+  }
+
+  timingPoints.sort((a, b) => a.ms - b.ms);
+  for (const point of timingPoints) lines.push(point.text);
+
   lines.push("");
   lines.push("[HitObjects]");
 
@@ -105,10 +145,7 @@ export function writeBeatmap(song: Song, chart: Chart, options: WriteOptions): W
   return { version, content: lines.join("\r\n") };
 }
 
-/**
- * osu stores no beat hint in hit objects; the absolute time alone decides
- * where the note lands. This wrapper only exists to expose the timing points.
- */
+/** Read-only view of the chart's timing, including the stop windows. */
 class TimingView {
   private readonly map: TimingMap;
 
@@ -118,6 +155,14 @@ class TimingView {
 
   redLines(): { ms: number; bpm: number }[] {
     return this.map.redLines().map((line) => ({ ms: line.ms, bpm: line.bpm }));
+  }
+
+  stopWindows(): { startMs: number; endMs: number }[] {
+    return this.map.stopWindows();
+  }
+
+  timeAt(beat: Beat): number {
+    return this.map.timeAt(beat);
   }
 }
 
@@ -147,8 +192,4 @@ function strip(text: string): string {
 
 function escapeString(text: string): string {
   return text.replace(/"/g, "'");
-}
-
-export function audioFileName(song: Song): string {
-  return song.assets.audio;
 }

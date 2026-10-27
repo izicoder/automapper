@@ -10,6 +10,17 @@ const OPTIONS: WriteOptions = {
   creator: "tester",
   audioFileName: "song.mp3",
   minHoldBeats: 1 / 32,
+  rollAsTaps: false,
+  rollTapBeats: 0.25,
+  stopEmulation: false,
+};
+
+/** Time of a beat in the fixtures: enough for the note-mapping call. */
+const NO_ROLLS = {
+  minHoldBeats: OPTIONS.minHoldBeats,
+  rollAsTaps: false,
+  rollTapBeats: 0.25,
+  timeAt: (): number => 0,
 };
 
 function writeFixture(name: string): { parsed: ParsedOsu; content: string; offsetSeconds: number } {
@@ -33,7 +44,7 @@ describe("beatmap writer (spec sections 6 and 7)", () => {
       const chart = song.charts[0]!;
 
       const { parsed } = writeFixture(name);
-      const expected = mapNotes(chart.notes, { minHoldBeats: OPTIONS.minHoldBeats }).notes;
+      const expected = mapNotes(chart.notes, NO_ROLLS).notes;
 
       expect(parsed.hitObjects).toHaveLength(expected.length);
       parsed.hitObjects.forEach((object, index) => {
@@ -66,6 +77,21 @@ describe("beatmap writer (spec sections 6 and 7)", () => {
     expect(parsed.timingPoints[1]!.beatLength).toBe(1000); // 60 BPM from beat 4
     // Beat 4 is reached through a 0.25 s stop: 1000 ms + 250 ms + 1000 ms.
     expect(parsed.timingPoints[1]!.ms).toBe(2250);
+  });
+
+  it("can emulate a stop with inherited SV lines", () => {
+    const outcome = loadStepManiaSong(songFixture("bpm-change-stop"));
+    const song = outcome.song!;
+    const parsed = parseOsu(
+      writeBeatmap(song, song.charts[0]!, { ...OPTIONS, stopEmulation: true }).content,
+    );
+
+    const inherited = parsed.timingPoints.filter((point) => point.uninherited === 0);
+    expect(inherited).toHaveLength(2);
+    // The stop sits on beat 2: 1000 ms, and lasts 250 ms.
+    expect(inherited[0]!.ms).toBe(1000);
+    expect(inherited[1]!.ms).toBe(1250);
+    expect(inherited[0]!.beatLength).toBeLessThan(0);
   });
 
   it("writes taps and holds in the osu!mania hit object format", () => {
@@ -103,7 +129,7 @@ describe("beatmap writer (spec sections 6 and 7)", () => {
     const song = outcome.song!;
     const written = writeBeatmap(song, song.charts[0]!, OPTIONS);
     expect(written.version).toBe("4K Hard #a1b2c3");
-    expect(parsedVersion(written.content)).toBe("4K Hard #a1b2c3");
+    expect(parseOsu(written.content).metadata["Version"]).toBe("4K Hard #a1b2c3");
   });
 
   it("claims no online identity", () => {
@@ -129,8 +155,13 @@ describe("beatmap writer (spec sections 6 and 7)", () => {
     expect(parsed.general["AudioFilename"]).toBe("song.mp3");
     expect(parsed.general["PreviewTime"]).toBe("1500");
   });
-});
 
-function parsedVersion(content: string): string {
-  return parseOsu(content).metadata["Version"]!;
-}
+  it("refuses a key count osu!mania cannot load", () => {
+    const song = loadStepManiaSong(songFixture("zero-offset")).song!;
+    const chart = { ...song.charts[0]!, keyCount: 19 };
+    expect(() => writeBeatmap(song, chart, OPTIONS)).toThrow(/1 to 18/);
+
+    const zero = { ...song.charts[0]!, keyCount: 0 };
+    expect(() => writeBeatmap(song, zero, OPTIONS)).toThrow(/1 to 18/);
+  });
+});

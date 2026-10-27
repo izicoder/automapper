@@ -2,12 +2,14 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { strToU8, zipSync } from "fflate";
 
-import type { Song } from "../ir/types.js";
+import type { Chart, Song } from "../ir/types.js";
 import { writeBeatmap, type WriteOptions } from "../osu/writer.js";
 
-export interface PackageOptions extends WriteOptions {
+export interface PackageOptions extends Omit<WriteOptions, "versionHash"> {
   /** Where the .osz is written. */
   outputPath: string;
+  /** Content hash of one difficulty (spec section 7). */
+  hashForChart: (chart: Chart) => string;
 }
 
 export interface PackageResult {
@@ -16,11 +18,15 @@ export interface PackageResult {
 }
 
 /**
- * Builds one .osz: all difficulties of the song plus its assets (spec
+ * Builds one .osz: every difficulty of the song plus its assets (spec
  * section 5). Audio and images are copied untouched, never re-encoded
  * (spec section 6).
  */
-export function packageSong(song: Song, options: PackageOptions): PackageResult {
+export function packageSong(
+  song: Song,
+  charts: readonly Chart[],
+  options: PackageOptions,
+): PackageResult {
   const files: Record<string, Uint8Array> = {};
   const versions: string[] = [];
 
@@ -30,8 +36,16 @@ export function packageSong(song: Song, options: PackageOptions): PackageResult 
     if (asset !== undefined) files[asset] = readFileSync(join(song.directory, asset));
   }
 
-  for (const chart of song.charts) {
-    const written = writeBeatmap(song, chart, options);
+  for (const chart of charts) {
+    const written = writeBeatmap(song, chart, {
+      versionHash: options.hashForChart(chart),
+      creator: options.creator,
+      audioFileName: options.audioFileName,
+      minHoldBeats: options.minHoldBeats,
+      rollAsTaps: options.rollAsTaps,
+      rollTapBeats: options.rollTapBeats,
+      stopEmulation: options.stopEmulation,
+    });
     versions.push(written.version);
     files[`${written.version}.osu`] = strToU8(written.content);
   }

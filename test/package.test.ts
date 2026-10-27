@@ -21,17 +21,24 @@ function scratch(): string {
   return dir;
 }
 
+const BASE = {
+  creator: "tester",
+  minHoldBeats: 1 / 32,
+  rollAsTaps: false,
+  rollTapBeats: 0.25,
+  stopEmulation: false,
+};
+
 describe("osz packaging (spec sections 5 and 7)", () => {
   it("puts the audio and one .osu per chart into the archive", () => {
     const song = loadStepManiaSong(songFixture("per-chart-timing")).song!;
     const outputPath = join(scratch(), "song.osz");
 
-    const result = packageSong(song, {
-      versionHash: "a1b2c3",
-      creator: "tester",
+    const result = packageSong(song, song.charts, {
+      ...BASE,
       audioFileName: song.assets.audio,
-      minHoldBeats: 1 / 32,
       outputPath,
+      hashForChart: () => "a1b2c3",
     });
 
     expect(result.versions).toEqual(["4K Easy #a1b2c3", "4K Hard #a1b2c3"]);
@@ -44,12 +51,11 @@ describe("osz packaging (spec sections 5 and 7)", () => {
     const song = loadStepManiaSong(songFixture("negative-offset")).song!;
     const outputPath = join(scratch(), "song.osz");
 
-    packageSong(song, {
-      versionHash: "a1b2c3",
-      creator: "tester",
+    packageSong(song, song.charts, {
+      ...BASE,
       audioFileName: song.assets.audio,
-      minHoldBeats: 1 / 32,
       outputPath,
+      hashForChart: () => "a1b2c3",
     });
 
     const archive = unzipSync(readFileSync(outputPath));
@@ -63,14 +69,13 @@ describe("osz packaging (spec sections 5 and 7)", () => {
     const first = join(scratch(), "first.osz");
     const second = join(scratch(), "second.osz");
     const options = {
-      versionHash: "a1b2c3",
-      creator: "tester",
+      ...BASE,
       audioFileName: song.assets.audio,
-      minHoldBeats: 1 / 32,
+      hashForChart: () => "a1b2c3",
     };
 
-    packageSong(song, { ...options, outputPath: first });
-    packageSong(song, { ...options, outputPath: second });
+    packageSong(song, song.charts, { ...options, outputPath: first });
+    packageSong(song, song.charts, { ...options, outputPath: second });
 
     expect(readFileSync(first).equals(readFileSync(second))).toBe(true);
   });

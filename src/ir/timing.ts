@@ -114,6 +114,18 @@ export class TimingMap {
     return out;
   }
 
+  /**
+   * Every stop as an absolute time window. The pause starts after a note on
+   * the stop's beat, so `timeAt` (which ignores the stop itself) gives the
+   * right start.
+   */
+  stopWindows(): { startMs: number; endMs: number }[] {
+    return this.stops.map((stop) => {
+      const startMs = this.timeAt(stop.beat);
+      return { startMs, endMs: startMs + stop.seconds * 1000 };
+    });
+  }
+
   private originMs(): number {
     return this.segments[0]?.startMs ?? 0;
   }

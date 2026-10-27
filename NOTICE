@@ -1,0 +1,35 @@
+NOTICE
+======
+
+This project is distributed under the GNU General Public License, version 3.
+See LICENSE for the full text.
+
+Third-party code
+----------------
+
+The key-count conversion in `src/transform/rizu/` and `src/transform/automap.ts`
+is a TypeScript port of the automapper from rizu vsrg:
+
+    rizu vsrg
+    https://github.com/semyon422/rizu
+    Copyright (C) rizu contributors
+    Licensed under the GNU General Public License v3.0
+
+Ported files (original rizu paths):
+
+    chart/transform/NotePreprocessor.lua  -> src/transform/rizu/preprocess.ts
+    chart/transform/BlockFinder.lua       -> src/transform/rizu/blocks.ts
+    chart/transform/NoteBlock.lua         -> src/transform/rizu/blocks.ts
+    chart/transform/LinePreReductor.lua   -> src/transform/rizu/reduce.ts
+    chart/transform/NoteCountReductor.lua -> src/transform/rizu/reduce.ts
+    chart/transform/LineBalancer.lua      -> src/transform/rizu/reduce.ts
+    chart/transform/NoteApplyer.lua       -> src/transform/rizu/reduce.ts
+    chart/transform/LongNoteReductor.lua  -> src/transform/rizu/reduce.ts
+    chart/transform/Reductor.lua          -> src/transform/rizu/reduce.ts
+    chart/transform/NextUpscaler.lua      -> src/transform/rizu/expand.ts
+    chart/transform/SolutionSeeker.lua    -> src/transform/rizu/expand.ts
+    chart/scoring/enps.lua                -> src/transform/rizu/enps.ts
+    sphere/models/ModifierModel/Automap.lua -> src/transform/automap.ts
+
+Only the key-count conversion was taken. rizu's scratch-lane mapping,
+difficulty generation and chart formats are not part of this port.
