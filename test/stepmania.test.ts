@@ -33,6 +33,11 @@ describe("StepMania song loader", () => {
     expect(times(outcome.song!.charts[0]!)).toEqual([0, 1000, 2000, 3000]);
   });
 
+  it("shifts a positive offset into negative time, unclamped", () => {
+    const outcome = loadStepManiaSong(fixture("positive-offset"));
+    expect(times(outcome.song!.charts[0]!)).toEqual([-250, 750, 1750, 2750]);
+  });
+
   it("handles BPM changes and stops sample-accurately", () => {
     const outcome = loadStepManiaSong(fixture("bpm-change-stop"));
     const chart = outcome.song!.charts[0]!;
