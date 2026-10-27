@@ -41,18 +41,25 @@ export interface ParsedFile {
 
 const RADAR_KEYS = ["notes", "holds", "mines", "rolls", "holds_second", "notes_second"] as const;
 
+export interface LoadOptions {
+  /** Read only this chart file, for a loose file dropped into INPUT/ (spec 5). */
+  chartFile?: string;
+  /** Key count for charts whose step type is unknown (spec section 5 override). */
+  assumeKeys?: number;
+}
+
 /**
  * Reads every .sm/.ssc file in a song folder and builds the IR song.
  *
- * Guesses (encoding, audio fallback, skipped charts) are returned as warnings
+ * Guesses (encoding, audio fallback, skipped chart) are returned as warnings
  * so the caller can log them (spec section 5).
  */
-export function loadStepManiaSong(songDir: string): LoadOutcome {
+export function loadStepManiaSong(songDir: string, options: LoadOptions = {}): LoadOutcome {
   const warnings: string[] = [];
 
   const entries = readdirSync(songDir, { withFileTypes: true });
   const files = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
-  const chartFiles = files
+  const chartFiles = (options.chartFile === undefined ? files : [options.chartFile])
     .filter((file) => CHART_EXTENSIONS.has(extname(file).toLowerCase()))
     .sort((a, b) => a.localeCompare(b));
 
@@ -79,7 +86,7 @@ export function loadStepManiaSong(songDir: string): LoadOutcome {
         continue;
       }
 
-      const chart = buildChart(raw, file, warnings);
+      const chart = buildChart(raw, file, warnings, options.assumeKeys);
       if (chart === null) continue;
       seen.add(duplicateKey);
       charts.push(chart);
@@ -263,12 +270,21 @@ function metadataFromTags(tags: MsdTag[]): SongMetadata {
   };
 }
 
-function buildChart(raw: RawChart, file: string, warnings: string[]): Chart | null {
-  const keyCount = keyCountForStepType(raw.stepType);
-  if (keyCount === undefined) {
+function buildChart(
+  raw: RawChart,
+  file: string,
+  warnings: string[],
+  assumeKeys: number | undefined,
+): Chart | null {
+  const declared = keyCountForStepType(raw.stepType);
+  if (declared === undefined && assumeKeys === undefined) {
     warnings.push(`${file}: unknown step type "${raw.stepType}", chart skipped`);
     return null;
   }
+  if (declared === undefined) {
+    warnings.push(`${file}: unknown step type "${raw.stepType}", assuming ${assumeKeys} keys`);
+  }
+  const keyCount = declared ?? assumeKeys!;
 
   const timing = parseTiming(raw.tags, file, warnings);
   let timingMap: TimingMap;

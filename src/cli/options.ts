@@ -11,6 +11,8 @@ export interface CliOptions {
   rollAsTaps: boolean;
   /** Distance between those taps, in beats. */
   rollTapBeats: number;
+  /** Key count for charts with an unknown step type, or undefined to skip them. */
+  assumeKeys?: number;
   seed: number;
   verbose: boolean;
   help: boolean;
@@ -61,6 +63,16 @@ export function parseArgs(argv: readonly string[]): CliOptions {
         options.rollTapBeats = parseNumber(next(), arg);
         if (!(options.rollTapBeats > 0)) throw new CliError(`${arg} must be greater than 0`);
         break;
+      case "--assume-keys": {
+        const value = Number(next());
+        if (!Number.isInteger(value) || value < MIN_KEY_COUNT || value > MAX_KEY_COUNT) {
+          throw new CliError(
+            `${arg} needs a whole number from ${MIN_KEY_COUNT} to ${MAX_KEY_COUNT}`,
+          );
+        }
+        options.assumeKeys = value;
+        break;
+      }
       case "--stop-emulation":
         options.stopEmulation = true;
         break;
@@ -113,6 +125,7 @@ Usage:
 Options:
   --keys <list>           also generate automapped difficulties, 1 to 18 keys
                           (e.g. 4 or 2,10,18)
+  --assume-keys <n>       key count for charts with an unknown step type
   --min-hold-beats <n>    holds shorter than n beats become taps (default 0.03125)
   --roll-taps             split rolls into a series of taps
   --roll-subdivision <n>  distance between those taps in beats (default 0.25)

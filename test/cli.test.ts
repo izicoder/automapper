@@ -1,9 +1,17 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+﻿import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { join } from "node:path";
 import { unzipSync } from "fflate";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { buildCharts, run } from "../src/cli/index.js";
+import { buildCharts, main, run } from "../src/cli/index.js";
 import { DEFAULT_OPTIONS } from "../src/cli/options.js";
 import { beat } from "../src/ir/beat.js";
 import type { Chart, Song } from "../src/ir/types.js";
@@ -39,7 +47,7 @@ describe("CLI end to end (spec sections 5, 7 and 11)", () => {
 
     const result = run([], logger, dirs);
 
-    expect(result).toEqual({ converted: 2, failed: 1 });
+    expect(result).toEqual({ converted: 2, failed: 2 });
 
     const files = readdirSync(join(dirs.output, "Demo Pack")).sort();
     expect(files).toHaveLength(2);
@@ -48,8 +56,62 @@ describe("CLI end to end (spec sections 5, 7 and 11)", () => {
     }
     expect(new Set(files).size).toBe(2); // same title/artist must not collide
 
-    expect(lines.some((line) => line.includes("skipped:"))).toBe(true);
-    expect(lines.some((line) => line.includes("2 songs converted, 1 skipped"))).toBe(true);
+    expect(lines.filter((line) => line.includes("skipped:")).length).toBe(2);
+    expect(lines.some((line) => line.includes("2 songs converted, 2 skipped"))).toBe(true);
+
+    // A broken chart (bad encoding) and a missing audio file are both skipped.
+    expect(lines.some((line) => line.includes("no usable chart"))).toBe(true);
+    expect(lines.some((line) => line.includes("no usable audio"))).toBe(true);
+  });
+
+  it("exits with a failure code when any song was skipped", () => {
+    const dirs = setupPack();
+    expect(main([], createTestLogger().logger, dirs)).toBe(1);
+  });
+
+  it("exits cleanly when everything converted", () => {
+    const root = scratch("cli-clean-");
+    const input = join(root, "INPUT");
+    const output = join(root, "OUTPUT");
+    mkdirSync(input, { recursive: true });
+    cpSync(songFixture("zero-offset"), join(input, "Zero Offset"), { recursive: true });
+
+    expect(main([], createTestLogger().logger, { input, output })).toBe(0);
+  });
+
+  it("converts a loose chart file in INPUT/ as a one-file song", () => {
+    const root = scratch("cli-loose-");
+    const input = join(root, "INPUT");
+    const output = join(root, "OUTPUT");
+    mkdirSync(input, { recursive: true });
+    copyFileSync(join(songFixture("zero-offset"), "song.sm"), join(input, "loose.sm"));
+    copyFileSync(join(songFixture("zero-offset"), "song.mp3"), join(input, "song.mp3"));
+
+    expect(run([], createTestLogger().logger, { input, output })).toEqual({
+      converted: 1,
+      failed: 0,
+    });
+
+    const files = readdirSync(output);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(/^Fixture - Zero Offset \[[0-9a-f]{6}\]\.osz$/);
+  });
+
+  it("uses --assume-keys for a chart with an unknown step type", () => {
+    const root = scratch("cli-unknown-");
+    const input = join(root, "INPUT");
+    const output = join(root, "OUTPUT");
+    mkdirSync(input, { recursive: true });
+    cpSync(songFixture("unknown-step-type"), join(input, "Strange"), { recursive: true });
+
+    expect(run([], createTestLogger().logger, { input, output })).toEqual({
+      converted: 0,
+      failed: 1,
+    });
+
+    const forced = run(["--assume-keys", "4"], createTestLogger().logger, { input, output });
+    expect(forced).toEqual({ converted: 1, failed: 0 });
+    expect(readdirSync(output)).toHaveLength(1);
   });
 
   it("produces identical files on a second run", () => {
@@ -90,7 +152,7 @@ describe("CLI end to end (spec sections 5, 7 and 11)", () => {
     const dirs = setupPack();
     const { logger } = createTestLogger();
 
-    expect(run(["--keys", "1,2,10,18"], logger, dirs)).toEqual({ converted: 2, failed: 1 });
+    expect(run(["--keys", "1,2,10,18"], logger, dirs)).toEqual({ converted: 2, failed: 2 });
 
     const files = readdirSync(join(dirs.output, "Demo Pack")).sort();
     const archive = unzipSync(readFileSync(join(dirs.output, "Demo Pack", files[0]!)));
@@ -182,3 +244,4 @@ describe("CLI end to end (spec sections 5, 7 and 11)", () => {
     );
   });
 });
+

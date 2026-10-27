@@ -106,6 +106,31 @@ describe("StepMania song loader", () => {
     expect(outcome.warnings.some((line) => line.includes("using the only audio file"))).toBe(true);
   });
 
+  it("decodes a Shift-JIS chart and logs the guess", () => {
+    const outcome = loadStepManiaSong(fixture("shift-jis"));
+    expect(outcome.song).not.toBeNull();
+    expect(outcome.song!.metadata.title).toBe("テスト曲");
+    expect(outcome.song!.metadata.artist).toBe("フィクスチャ");
+    expect(times(outcome.song!.charts[0]!)).toEqual([0, 1000, 2000, 3000]);
+    expect(outcome.warnings.some((line) => line.includes("decoded as Shift-JIS"))).toBe(true);
+  });
+
+  it("uses the override key count for an unknown step type", () => {
+    const skipped = loadStepManiaSong(fixture("unknown-step-type"));
+    expect(skipped.song).toBeNull();
+
+    const forced = loadStepManiaSong(fixture("unknown-step-type"), { assumeKeys: 4 });
+    expect(forced.song).not.toBeNull();
+    expect(forced.song!.charts[0]!.keyCount).toBe(4);
+    expect(forced.warnings.some((line) => line.includes("assuming 4 keys"))).toBe(true);
+  });
+
+  it("reads a single chart file for a loose file in INPUT/", () => {
+    const outcome = loadStepManiaSong(fixture("per-chart-timing"), { chartFile: "chart.ssc" });
+    expect(outcome.song).not.toBeNull();
+    expect(outcome.song!.charts).toHaveLength(2);
+  });
+
   it("skips charts with an unknown step type", () => {
     const outcome = loadStepManiaSong(fixture("unknown-step-type"));
     expect(outcome.song).toBeNull();

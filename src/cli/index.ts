@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { Logger } from "../log.js";
 import { discover, type SongEntry } from "../package/layout.js";
@@ -60,6 +60,7 @@ export function run(
     stopEmulation: options.stopEmulation,
     rollAsTaps: options.rollAsTaps,
     rollTapBeats: options.rollTapBeats,
+    assumeKeys: options.assumeKeys,
     seed: options.seed,
   };
 
@@ -84,8 +85,18 @@ export function run(
     }
   }
 
-  if (discovery.loose.length > 0) {
-    logger.warn(`${discovery.loose.length} loose chart files ignored: put each song in its own folder`);
+  // Loose chart files in INPUT/ are one-file songs (spec section 5).
+  for (const file of discovery.loose) {
+    const result = convertSong(
+      { directory: dirname(file), label: basename(file) },
+      outputDir,
+      settings,
+      options,
+      logger,
+      { chartFile: basename(file) },
+    );
+    converted += result.converted;
+    failed += result.failed;
   }
 
   logger.info(`${converted} songs converted, ${failed} skipped`);
@@ -98,8 +109,12 @@ function convertSong(
   settings: Record<string, unknown>,
   options: CliOptions,
   logger: Logger,
+  loadOptions: { chartFile?: string } = {},
 ): RunResult {
-  const outcome = loadStepManiaSong(entry.directory);
+  const outcome = loadStepManiaSong(entry.directory, {
+    assumeKeys: options.assumeKeys,
+    ...loadOptions,
+  });
   for (const warning of outcome.warnings) logger.warn(warning, entry.label);
 
   if (outcome.song === null) {
@@ -188,10 +203,14 @@ function safeName(name: string): string {
 }
 
 /** Entry point: runs the conversion and sets the exit code (spec section 11). */
-export function main(argv: readonly string[] = process.argv.slice(2)): number {
-  const logger = new Logger();
-  const result = run(argv, logger);
-  return result.failed > 0 && result.converted === 0 ? 1 : 0;
+export function main(
+  argv: readonly string[] = process.argv.slice(2),
+  logger: Logger = new Logger(),
+  dirs?: RunDirs,
+): number {
+  const result = run(argv, logger, dirs);
+  // Any skipped song is a partial failure, and the exit code must say so.
+  return result.failed > 0 ? 1 : 0;
 }
 
 // Only run when invoked directly, not when imported by tests.

@@ -1,0 +1,3 @@
+# Binary-sensitive fixtures: keep git from rewriting their bytes.
+test/fixtures/songs/shift-jis/song.sm -text
+test/fixtures/packs/demo-pack/bad-encoding/song.sm -text

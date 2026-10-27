@@ -59,6 +59,7 @@ describe("INPUT discovery (spec section 5)", () => {
 
     expect(discovery.packs.map((pack) => pack.label)).toEqual(["demo-pack"]);
     expect(discovery.packs[0]!.songs.map((song) => song.label)).toEqual([
+      "bad-encoding",
       "broken",
       "same-title-a",
       "same-title-b",

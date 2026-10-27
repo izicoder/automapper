@@ -86,6 +86,17 @@ Not done yet: BMS input and keysounds (spec v1.1), UI (spec v1.1), separate
 .osz per automapped difficulty (allowed by spec section 5, not asked for yet).
 Scratch lanes and rizu's other modifiers are out of scope.
 
+Spec deviations, on purpose:
+
+- Section 10 asks for density, jack-tolerance and chord-limit knobs. rizu's
+  conversion has no such parameters, so the port keeps rizu's behaviour
+  instead of inventing flags.
+- Section 10's "add notes only where density permits" during expansion is not
+  done: rizu's upscaler only moves existing notes, which also satisfies the
+  "never invent notes" rule.
+- Automapped difficulties share one .osz with the source ones; the spec allows
+  either layout.
+
 ## Licensing
 
 The project is GPL-3.0 (see `LICENSE`). The automapper is a TypeScript port of

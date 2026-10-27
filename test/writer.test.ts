@@ -164,4 +164,44 @@ describe("beatmap writer (spec sections 6 and 7)", () => {
     const zero = { ...song.charts[0]!, keyCount: 0 };
     expect(() => writeBeatmap(song, zero, OPTIONS)).toThrow(/1 to 18/);
   });
+
+  it("writes a structurally valid .osu file", () => {
+    const outcome = loadStepManiaSong(songFixture("note-types"));
+    const song = outcome.song!;
+    const content = writeBeatmap(song, song.charts[0]!, OPTIONS).content;
+    const lines = content.split("\r\n");
+
+    for (const section of ["[General]", "[Metadata]", "[Difficulty]", "[Events]", "[TimingPoints]", "[HitObjects]"]) {
+      expect(lines).toContain(section);
+    }
+
+    const timingHeader = lines.indexOf("[TimingPoints]");
+    const objectsHeader = lines.indexOf("[HitObjects]");
+    expect(timingHeader).toBeGreaterThan(-1);
+    expect(objectsHeader).toBeGreaterThan(timingHeader);
+
+    for (const line of lines.slice(timingHeader + 1, objectsHeader).filter((entry) => entry.length > 0)) {
+      expect(line.split(",")).toHaveLength(8); // time, beatLength, meter, sampleSet, sampleIndex, volume, uninherited, effects
+    }
+
+    let previousTime = Number.NEGATIVE_INFINITY;
+    for (const line of lines.slice(objectsHeader + 1).filter((entry) => entry.length > 0)) {
+      const fields = line.split(",");
+      expect(fields).toHaveLength(6);
+      const [x, y, time, type, hitSound] = fields;
+      expect(Number(x)).toBeGreaterThanOrEqual(0);
+      expect(Number(x)).toBeLessThan(512);
+      expect(y).toBe("192");
+      expect(Number.isInteger(Number(time))).toBe(true);
+      expect(Number(time)).toBeGreaterThanOrEqual(previousTime);
+      previousTime = Number(time);
+      expect(["1", "128"]).toContain(type);
+      expect(hitSound).toBe("0");
+
+      if (type === "128") {
+        const endTime = Number(fields[5]!.split(":")[0]);
+        expect(endTime).toBeGreaterThan(Number(time));
+      }
+    }
+  });
 });
