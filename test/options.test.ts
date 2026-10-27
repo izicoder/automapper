@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { CliError, DEFAULT_OPTIONS, parseArgs } from "../src/cli/options.js";
+import { CliError, DEFAULT_OPTIONS, argvFromOptions, parseArgs } from "../src/cli/options.js";
 
 describe("command line options (spec section 11)", () => {
   it("has documented defaults", () => {
@@ -64,5 +64,30 @@ describe("command line options (spec section 11)", () => {
   it("requires a value for flags that need one", () => {
     expect(() => parseArgs(["--keys"])).toThrow(/needs a value/);
     expect(() => parseArgs(["--seed"])).toThrow(/needs a value/);
+  });
+
+  it("turns options back into the command line that produces them", () => {
+    // The UI shows this and hands the same argv to the worker (spec section 7).
+    expect(argvFromOptions(parseArgs([]))).toEqual([]);
+
+    const argv = [
+      "--keys",
+      "4,10,18",
+      "--assume-keys",
+      "6",
+      "--min-hold-beats",
+      "0.5",
+      "--roll-taps",
+      "--roll-subdivision",
+      "0.125",
+      "--stop-emulation",
+      "--force",
+      "--seed",
+      "7",
+      "--verbose",
+    ];
+
+    expect(argvFromOptions(parseArgs(argv))).toEqual(argv);
+    expect(parseArgs(argvFromOptions(parseArgs(argv)))).toEqual(parseArgs(argv));
   });
 });

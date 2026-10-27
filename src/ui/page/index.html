@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>converter — osu!mania</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header id="top">
+      <div class="brand">converter <small>osu!mania</small></div>
+
+      <div class="options">
+        <label title="Also generate automapped difficulties, 1 to 18 keys">
+          <span>keys</span>
+          <input id="opt-keys" type="text" placeholder="4,10,18" spellcheck="false" />
+        </label>
+        <label title="Key count for charts with an unknown step type">
+          <span>assume</span>
+          <input id="opt-assume" type="number" min="1" max="18" placeholder="off" />
+        </label>
+        <label title="Holds shorter than this many beats become taps">
+          <span>min hold</span>
+          <input id="opt-minhold" type="number" step="0.001" min="0" value="0.03125" />
+        </label>
+        <label title="Split rolls into a series of taps">
+          <span><input id="opt-rolltaps" type="checkbox" /> roll taps</span>
+        </label>
+        <label title="Distance between those taps, in beats">
+          <span>subdiv</span>
+          <input id="opt-rollsub" type="number" step="0.001" min="0.001" value="0.25" />
+        </label>
+        <label title="Emulate stops with a near-zero SV line">
+          <span><input id="opt-stops" type="checkbox" /> stops</span>
+        </label>
+        <label title="Automapper seed, part of the output hash">
+          <span>seed</span>
+          <input id="opt-seed" type="number" step="1" value="0" />
+        </label>
+        <label title="Unpack and convert archives again, even if unchanged">
+          <span><input id="opt-force" type="checkbox" /> force</span>
+        </label>
+        <label title="Show debug lines">
+          <span><input id="opt-verbose" type="checkbox" /> verbose</span>
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="help" class="ghost" title="Show the CLI help in the log">?</button>
+        <button id="rescan" class="ghost">Rescan</button>
+        <button id="convert" class="primary">Convert selected</button>
+        <button id="open-output">Open OUTPUT</button>
+      </div>
+
+      <div class="command">
+        <span>cli</span>
+        <code id="command">converter</code>
+      </div>
+    </header>
+
+    <main>
+      <section class="pane">
+        <div class="pane-head">
+          <h2>Discovered</h2>
+          <span id="summary" class="muted"></span>
+          <span class="spacer"></span>
+          <button id="select-all" class="ghost">All</button>
+          <button id="select-none" class="ghost">None</button>
+          <button id="clear-drop" class="ghost hidden">Clear dropped</button>
+          <button id="add-folder" class="ghost">Add folder…</button>
+        </div>
+        <div class="list" id="list"></div>
+        <div class="dropzone" id="dropzone">
+          <strong>Drop files or folders</strong>
+          <span>chart folders, packs and .zip archives are added to the list</span>
+        </div>
+      </section>
+
+      <section class="pane">
+        <div class="pane-head">
+          <h2>Progress</h2>
+          <span id="status" class="muted">idle</span>
+          <div class="bar"><div id="bar-fill"></div></div>
+          <span class="spacer"></span>
+          <button id="clear-log" class="ghost">Clear</button>
+        </div>
+        <pre class="log" id="log"></pre>
+      </section>
+    </main>
+
+    <div class="overlay hidden" id="overlay"><div>Drop to add</div></div>
+    <input id="folder-input" type="file" webkitdirectory multiple hidden />
+    <script src="/app.js"></script>
+  </body>
+</html>

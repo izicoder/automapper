@@ -19,7 +19,9 @@ repository is laid out and how to work in it.
 - `npm install` — install dependencies (Node 22+).
 - `npm run typecheck` — `tsc --noEmit`, must be clean before any commit.
 - `npm test` — run the vitest suite once (`npm run test:watch` to watch).
-- `npm run build` — emit JavaScript to `dist/`.
+- `npm run build` — emit JavaScript to `dist/` and copy the UI page into it.
+- `npm run ui` — build, serve the UI on 127.0.0.1 and open the browser.
+- `launch.bat` — same thing for a double-click: installs, builds, opens the UI.
 - `npm run convert` — run the CLI from source with `tsx`.
 - `npm run convert:built` — run the compiled CLI from `dist/`.
 - `npm run convert -- --keys 4,10,18` — CLI flags go after `--`.
@@ -29,11 +31,39 @@ repository is laid out and how to work in it.
 
 `npm test` covers timing and offsets (1 ms tolerance), per-chart `.ssc`
 timing, note mapping, the written `.osu` structure, naming and idempotence,
-pack discovery, encodings, CLI end to end, and the automapper across 1K-18K.
+pack discovery, encodings, CLI end to end, the automapper across 1K-18K, and
+the UI's discovery, drop staging, output marks and HTTP endpoints.
 
 Importing a generated `.osz` into osu! is a manual check; the writer is
 verified against the real file format instead (field counts, types, x
 positions, ordering).
+
+## UI
+
+`npm run ui` (or `launch.bat`) serves a local page on 127.0.0.1, random port,
+loopback only, and opens it in the browser. Layout is the one in spec section
+7: options on top, discovered charts on the left, log on the right.
+
+- The page is plain HTML/CSS/JS in `src/ui/page/`, copied into `dist/` by
+  `scripts/copy-ui-page.mjs` (tsc only emits JavaScript).
+- The form is turned into argv with `argvFromOptions` and validated by
+  `parseArgs`, so the UI and the CLI cannot drift. The same argv is shown in
+  the top bar and handed to the worker.
+- Discovery (`src/ui/scan.ts`) lists INPUT/ and the drop staging folder, with
+  per-chart key counts. A row is marked "in OUTPUT" when the .osz name that
+  `setSettingsHash`/`setFileName` would produce already exists. Real ones are
+  green; automapped targets are amber (up) or violet (down).
+- Conversion runs in a worker thread (`src/ui/worker.ts`) so the page keeps
+  answering; log lines and progress arrive over SSE (`GET /api/events`).
+  The server falls back to in-process conversion if `dist/` was not built.
+- Dropped files are staged in the OS temp folder (`src/ui/stage.ts`), never
+  copied into INPUT/, and converted from there. Converted output always lands
+  in OUTPUT/. The staging folder is removed on shutdown, and a bad path is
+  rejected instead of written.
+- Endpoints: `GET /`, `/app.js`, `/style.css`, `/api/help`, `/api/events`;
+  `POST /api/scan`, `/api/drop?path=`, `/api/convert`, `/api/clear-drop`,
+  `/api/open-output`, `/api/open-input`.
+- One conversion at a time; a second request gets 409.
 
 ## Archives in INPUT/
 
@@ -85,9 +115,20 @@ src/
     layout.ts     Walks INPUT/: song folders, packs, loose files, archives.
     archive.ts    .zip unpacking (zip-slip safe) and the converted-archive state.
     osz.ts        Builds one .osz per song with all difficulties and assets.
-  cli/            Command-line entry point.
-    options.ts    Argument parsing and the usage text.
-    index.ts      run(): discovery -> parse -> package, one log line per event.
+  cli/            Command-line entry point and everything the UI shares.
+    options.ts    Argument parsing, the usage text, argvFromOptions.
+    charts.ts     buildCharts(): source difficulties + automapped ones.
+    jobs.ts       Discovery -> ConversionJob[], runJobs(): one song at a time.
+    types.ts      RunDirs / RunResult / RunProgress.
+    index.ts      run(): discovery -> jobs -> package, one log line per event.
+  ui/             Local web UI (spec section 7).
+    server.ts     node:http server, endpoints, SSE log stream, one run at a time.
+    scan.ts       INPUT/ + dropped songs -> what the left panel lists.
+    stage.ts      Temporary staging for dropped files, path sanitiser.
+    worker.ts     Conversion in a worker thread, streams log lines and progress.
+    protocol.ts   Worker request/message types.
+    open.ts       Opens a folder or URL in the OS handler.
+    page/         index.html, style.css, app.js. No framework, no build step.
 test/             Vitest tests (`*.test.ts`) plus committed fixtures.
   fixtures/songs/ One folder per source-edge fixture: offsets, BPM change and
                   stop, note types, per-chart .ssc timing, audio fallback,
@@ -97,6 +138,10 @@ test/             Vitest tests (`*.test.ts`) plus committed fixtures.
                   keeps going.
   osu-format.ts   Tiny .osu reader used by the writer and package tests.
   temp.ts         Scratch folders for tests (under the temp directory).
+scripts/
+  copy-ui-page.mjs Copies src/ui/page into dist/ after tsc.
+  smoke-parse.ts   Manual parser scratch script.
+launch.bat        Double-click entry: npm install, build, serve the UI.
 INPUT/            Everything to convert. Never modified by the tool. Git-ignored.
 OUTPUT/           Everything the tool produces. Git-ignored.
 ```
@@ -106,8 +151,8 @@ git never rewrites their bytes.
 
 ## Status
 
-Spec v1 is done; see `SPEC.txt` section 0 and the tests. Remaining work is
-listed in `SPEC.txt` (BMS/keysounds, .dwi, UI).
+Spec v1 is done, and the UI from v1.1 is done. Remaining work is listed in
+`SPEC.txt` (BMS/keysounds, .dwi).
 
 Automapper specifics:
 
@@ -122,7 +167,7 @@ Automapper specifics:
   legal count and logged. `--keys` only accepts 1K-18K, and every written
   difficulty is legal (`src/keys.ts`, enforced by the writer).
 
-Not done yet: BMS input and keysounds, .dwi input, UI (all spec v1.1).
+Not done yet: BMS input and keysounds, .dwi input (spec v1.1).
 Scratch lanes and rizu's other modifiers are out of scope.
 
 Spec deviations, on purpose:

@@ -35,6 +35,33 @@ export const DEFAULT_OPTIONS: CliOptions = {
 export class CliError extends Error {}
 
 /**
+ * The inverse of `parseArgs`: the command line that reproduces these options.
+ * The UI shows it next to its controls and hands the same argv to the worker,
+ * so a control and its flag can never disagree (spec section 7).
+ */
+export function argvFromOptions(options: CliOptions): string[] {
+  const argv: string[] = [];
+
+  if (options.keys.length > 0) argv.push("--keys", options.keys.join(","));
+  if (options.assumeKeys !== undefined) argv.push("--assume-keys", String(options.assumeKeys));
+  if (options.minHoldBeats !== DEFAULT_OPTIONS.minHoldBeats) {
+    argv.push("--min-hold-beats", String(options.minHoldBeats));
+  }
+  if (options.rollAsTaps) argv.push("--roll-taps");
+  if (options.rollTapBeats !== DEFAULT_OPTIONS.rollTapBeats) {
+    argv.push("--roll-subdivision", String(options.rollTapBeats));
+  }
+  if (options.stopEmulation) argv.push("--stop-emulation");
+  if (options.force) argv.push("--force");
+  if (options.seed !== DEFAULT_OPTIONS.seed) argv.push("--seed", String(options.seed));
+  if (options.verbose) argv.push("--verbose");
+  if (options.help) argv.push("--help");
+
+  return argv;
+}
+
+
+/**
  * Parses the command line (spec section 11). Unknown flags are an error so a
  * typo never silently changes the output.
  */
@@ -101,8 +128,7 @@ export function parseArgs(argv: readonly string[]): CliOptions {
 }
 
 /** osu!mania key counts, from 1K to 18K (10K+ are dual-stage / Co-Op). */
-function parseKeys(text: string): number[] {
-  const keys: number[] = [];
+function parseKeys(text: string): number[] {  const keys: number[] = [];
 
   for (const part of text.split(",")) {
     const value = Number(part.trim());

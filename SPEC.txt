@@ -36,8 +36,10 @@ existing converters and the main reason this tool exists.
    app's own directory, not the shell's working directory).
 5. Everything produced goes to OUTPUT/, also next to the program. This
    covers plain conversions and automapped results.
-6. UI drag and drop copies files into INPUT/ and writes results to OUTPUT/.
-   The UI never has a separate storage location.
+6. UI drag and drop converts dropped items without copying them into INPUT/:
+   they are staged in a temporary folder, treated exactly like INPUT/
+   entries, and the staging copy is deleted. INPUT/ stays as the user left
+   it, results go to OUTPUT/, and there is no second storage location.
 7. INPUT/ is never modified or deleted by the tool.
 
 
@@ -46,7 +48,9 @@ existing converters and the main reason this tool exists.
 V1.1:
 - BMS/BME/BML/PMS input with keysounds.
 - .dwi input.
-- UI.
+
+The UI is done (section 7); it is described here because it is part of the
+product, not as remaining work.
 
 Carried over from v1 as a known gap (see AGENTS.md "Spec deviations"):
 - The automapper has no density, jack-tolerance or chord-limit parameters.
@@ -119,10 +123,26 @@ Edge rules (already implemented for StepMania, reuse them):
 
 7. UI (V1.1)
 ------------
-Drag and drop area. Dropped files and folders are copied into INPUT/,
-converted, and the results appear in OUTPUT/. The UI offers the same options
-as the CLI and a button to open OUTPUT/. It must not introduce any other
-storage path.
+One window, three areas:
+
+- Top: the CLI options as controls. Every flag the CLI accepts is reachable
+  here (--keys, --assume-keys, --force, --min-hold-beats, --roll-taps,
+  --roll-subdivision, --stop-emulation, --seed, --verbose), validated by the
+  same parser, and the equivalent command line is shown next to them so the
+  two can never drift. Buttons: rescan, convert, open OUTPUT/, CLI help.
+- Left: everything discovered and ready to convert: INPUT/ songs grouped by
+  pack, loose chart files, archives, plus whatever was dropped onto the
+  window. A song lists its charts with difficulty name, source key count,
+  note count and the key counts it will be automapped to. Entries are
+  selected individually or all at once.
+- Right: progress and the conversion log, streamed line by line while the
+  conversion runs, with a running converted/failed count.
+
+Dropped files and folders join the discovered list as if they sat in INPUT/,
+but they are never copied into it. They are staged in a temporary folder,
+converted from there, and the staging copy is removed. INPUT/ is never
+modified or deleted. Converted output always goes to OUTPUT/, dropped or
+not; the UI has no other result location.
 
 
 8. ACCEPTANCE FOR V1.1
@@ -130,8 +150,10 @@ storage path.
 1. A BMS song with keysounds in INPUT/ yields one .osz with the notes, the
    per-note samples and the BGM sample events at the right absolute times.
 2. A .dwi song converts like a StepMania song.
-3. The UI copies dropped files/folders into INPUT/, converts with the CLI
-   options, and opens OUTPUT/. No second storage location exists.
+3. The UI lists the discovered charts, converts the selected ones with the
+   CLI options, streams the log, and opens OUTPUT/. Dropped items are staged
+   temporarily and converted to OUTPUT/; INPUT/ is never modified and no
+   second storage location exists.
 4. Every v1 test still passes; new formats have their own fixtures.
 5. AGENTS.md matches the repository and the work is committed.
 
@@ -152,6 +174,9 @@ Decided:
 - osu!mania key counts run 1K-18K. Source charts outside that range are
   automapped to the closest legal count; --keys only accepts 1K-18K.
 - The automapper exposes no density/jack/chord settings (rizu has none).
+- The UI is a local web page served by Node, no framework and no extra
+  dependency, because the conversion already runs in-process and the browser
+  provides drag and drop (section 7).
 
 Open:
-- None for v1. BMS, .dwi and the UI are the remaining work.
+- None for v1. BMS and .dwi are the remaining work.
