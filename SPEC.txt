@@ -134,9 +134,14 @@ One window, three areas:
   pack, loose chart files, archives, plus whatever was dropped onto the
   window. A song lists its charts with difficulty name, source key count,
   note count and the key counts it will be automapped to. Entries are
-  selected individually or all at once.
+  selected individually or all at once. The list follows INPUT/ and the drop
+  folder by itself: no rescan button, changes appear while the UI is open.
 - Right: progress and the conversion log, streamed line by line while the
   conversion runs, with a running converted/failed count.
+
+Every line the UI shows is also appended to `automapper.log` next to the
+program, with a timestamp. The file survives restarts and conversions, so an
+error from an earlier session can still be read.
 
 Dropped files and folders join the discovered list as if they sat in INPUT/,
 but they are never copied into it. They are staged in a temporary folder,

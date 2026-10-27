@@ -49,6 +49,10 @@ loopback only, and opens it in the browser. Layout is the one in spec section
 - The form is turned into argv with `argvFromOptions` and validated by
   `parseArgs`, so the UI and the CLI cannot drift. The same argv is shown in
   the top bar and handed to the worker.
+- The list updates itself: `src/ui/watch.ts` follows INPUT/ and the drop
+  staging folder, and the server pushes a fresh scan over SSE. A conversion
+  refreshes the list the same way. There is no rescan button, and the page
+  rescans on its own when an option changes.
 - Discovery (`src/ui/scan.ts`) lists INPUT/ and the drop staging folder, with
   per-chart key counts. A row is marked "in OUTPUT" when the .osz name that
   `setSettingsHash`/`setFileName` would produce already exists. Real ones are
@@ -64,6 +68,17 @@ loopback only, and opens it in the browser. Layout is the one in spec section
   `POST /api/scan`, `/api/drop?path=`, `/api/convert`, `/api/clear-drop`,
   `/api/open-output`, `/api/open-input`.
 - One conversion at a time; a second request gets 409.
+
+## automapper.log
+
+Both the CLI and the UI append every log line to `automapper.log` next to the
+program (`APP_ROOT`, git-ignored), with a UTC timestamp. It is never truncated
+between runs, so errors from an earlier session can still be read. The UI
+writes the same lines it streams to the page, plus failed HTTP requests and
+start/stop lines. Over 8 MB the file is moved to `automapper.log.1` once, at
+startup (one previous file is kept).
+
+Logging is best effort: a log that cannot be written never stops a conversion.
 
 ## Archives in INPUT/
 

@@ -9,6 +9,8 @@ dist/
 INPUT/
 OUTPUT/
 coverage/
+automapper.log
+automapper.log.1
 
 # source packs / large binaries kept locally only
 *.zip

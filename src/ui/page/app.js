@@ -349,7 +349,6 @@ async function startConvert() {
 function setRunning(running) {
   state.running = running;
   $("convert").disabled = running;
-  $("rescan").disabled = running;
   if (running) setStatus("converting…");
   else setStatus("idle");
 }
@@ -421,6 +420,13 @@ function connectEvents() {
       setRunning(true);
       logLine("INFO  a conversion is already running");
     }
+  });
+
+  // The server watches INPUT/ and the drop folder, so the list updates itself.
+  events.addEventListener("scan", (event) => {
+    state.scan = JSON.parse(event.data);
+    state.convertedNow.clear();
+    render();
   });
 
   events.onerror = () => setStatus("reconnecting…");

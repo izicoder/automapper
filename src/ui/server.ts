@@ -15,11 +15,13 @@ import {
 } from "../cli/options.js";
 import type { RunDirs } from "../cli/types.js";
 import { Logger } from "../log.js";
+import { appendToLogFile, prepareLogFile } from "../log-file.js";
 import { ensureInputDir, ensureOutputDir } from "../paths.js";
-import { openPath } from "./open.js";
+import { openFolder, openUrl } from "./open.js";
 import type { WorkerMessage, WorkerRequest } from "./protocol.js";
 import { scan, type ScanResult } from "./scan.js";
 import { DropStage } from "./stage.js";
+import { watchForChanges } from "./watch.js";
 
 /** Options as the form sends them: loose, strings allowed, validated below. */
 export type FormValues = Record<string, unknown>;
@@ -76,19 +78,41 @@ export function startUiServer(options: UiServerOptions): Promise<UiServer> {
 
   const clients = new Set<ServerResponse>();
   let running = false;
+  let scanPending = false;
   let lastScan: ScanResult | null = null;
   let lastJobs: ConversionJob[] = [];
+  let lastValues: FormValues | undefined;
+  const stops: (() => void)[] = [];
 
   function stageDir(): string | null {
     return stage?.dir ?? null;
   }
 
   function ensureStage(): DropStage {
-    if (stage === null) stage = DropStage.create();
+    if (stage === null) {
+      stage = DropStage.create();
+      watch(stage.dir);
+    }
     return stage;
   }
 
+  /** Follows a folder so the list updates itself, without a rescan button. */
+  function watch(dir: string): void {
+    stops.push(
+      watchForChanges([dir], () => {
+        // A running conversion is already logged and rescanned when it ends.
+        if (running) {
+          scanPending = true;
+          return;
+        }
+        broadcastScan();
+      }),
+    );
+  }
+
   function send(event: string, data: unknown): void {
+    // Every log line also lands in automapper.log, clients or not.
+    if (event === "log") appendToLogFile((data as { line: string }).line);
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const client of clients) client.write(payload);
   }
@@ -141,15 +165,26 @@ export function startUiServer(options: UiServerOptions): Promise<UiServer> {
   }
 
   function scanNow(values: FormValues | undefined): ScanResult {
+    lastValues = values ?? lastValues;
     const scanned = scan({
       inputDir: dirs.input,
       outputDir: dirs.output,
       stageDir: stageDir(),
-      options: currentOptions(values),
+      options: currentOptions(lastValues),
     });
     lastScan = scanned.result;
     lastJobs = scanned.jobs;
     return scanned.result;
+  }
+
+  /** Pushes a fresh list to every open page (spec 7: no manual rescan). */
+  function broadcastScan(): void {
+    try {
+      const result = scanNow(lastValues);
+      send("scan", { ...result, argv: argvFromOptions(currentOptions(lastValues)) });
+    } catch (error) {
+      send("log", { line: `ERROR scan failed: ${(error as Error).message}` });
+    }
   }
 
   async function prepareConversion(
@@ -208,6 +243,10 @@ export function startUiServer(options: UiServerOptions): Promise<UiServer> {
       running = false;
       send("done", { converted, failed, total: jobs.length });
       send("status", { running, done: jobs.length, total: jobs.length, converted, failed });
+      // Results just landed in OUTPUT/, and anything changed during the run
+      // still has to show up: refresh the list for every open page.
+      scanPending = false;
+      broadcastScan();
     }
   }
 
@@ -247,7 +286,7 @@ export function startUiServer(options: UiServerOptions): Promise<UiServer> {
       }
       if (req.method === "POST" && path === "/api/clear-drop") {
         stage?.clear();
-        const result = scanNow(undefined);
+        const result = scanNow(lastValues);
         return json(res, 200, result);
       }
       if (req.method === "POST" && path === "/api/convert") {
@@ -261,20 +300,21 @@ export function startUiServer(options: UiServerOptions): Promise<UiServer> {
       }
       if (req.method === "POST" && path === "/api/open-output") {
         mkdirSync(dirs.output, { recursive: true });
-        openPath(dirs.output);
+        openFolder(dirs.output);
         return json(res, 200, { opened: dirs.output });
       }
       if (req.method === "POST" && path === "/api/open-input") {
         mkdirSync(dirs.input, { recursive: true });
-        openPath(dirs.input);
+        openFolder(dirs.input);
         return json(res, 200, { opened: dirs.input });
       }
 
       return json(res, 404, { error: "not found" });
     } catch (error) {
-      if (error instanceof HttpError) return json(res, error.status, { error: error.message });
-      if (error instanceof CliError) return json(res, 400, { error: error.message });
-      return json(res, 500, { error: (error as Error).message });
+      const status = error instanceof HttpError ? error.status : error instanceof CliError ? 400 : 500;
+      const message = (error as Error).message;
+      appendToLogFile(`${status >= 500 ? "ERROR" : "WARN "} ${req.method} ${path}: ${message}`);
+      return json(res, status, { error: message });
     }
   };
 
@@ -333,9 +373,14 @@ export function startUiServer(options: UiServerOptions): Promise<UiServer> {
       const port = typeof address === "object" && address !== null ? address.port : 0;
       const url = `http://${host}:${port}/`;
 
-      if (options.openBrowser === true) openPath(url);
+      // Follow INPUT/ (and the staging folder) so the list stays current.
+      watch(dirs.input);
+      if (stage !== null) watch(stage.dir);
+
+      if (options.openBrowser === true) openUrl(url);
 
       const close = async (): Promise<void> => {
+        for (const stop of stops.splice(0)) stop();
         for (const client of clients) client.end();
         clients.clear();
         if (ownsStage) stage?.dispose();
@@ -486,10 +531,13 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     openBrowser,
   });
 
+  prepareLogFile();
   process.stdout.write(`converter UI: ${server.url}\n`);
   process.stdout.write("press Ctrl+C to stop\n");
+  appendToLogFile(`INFO  ui listening on ${server.url}`);
 
   const stop = (): void => {
+    appendToLogFile("INFO  ui stopped");
     void server.close().then(() => process.exit(0));
   };
   process.on("SIGINT", stop);
@@ -498,7 +546,9 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
 if (process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/"))) {
   void main().catch((error: unknown) => {
-    process.stderr.write(`${(error as Error).message}\n`);
+    const message = (error as Error).message;
+    process.stderr.write(`${message}\n`);
+    appendToLogFile(`ERROR ui failed to start: ${message}`);
     process.exitCode = 1;
   });
 }

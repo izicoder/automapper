@@ -116,6 +116,33 @@ function outputFiles(output: string): string[] {
   return readdirSync(output).filter((name) => name !== ".archive-state.json");
 }
 
+/** Keeps an SSE connection open and collects everything the server sends. */
+async function openStream(server: UiServer): Promise<{ text: () => string; stop: () => Promise<void> }> {
+  const events = await fetch(new URL("api/events", server.url));
+  const reader = events.body!.getReader();
+  const decoder = new TextDecoder();
+  let stream = "";
+
+  void (async () => {
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        stream += decoder.decode(value, { stream: true });
+      }
+    } catch {
+      // Closed by the test.
+    }
+  })();
+
+  return {
+    text: () => stream,
+    stop: async () => {
+      await reader.cancel().catch(() => undefined);
+    },
+  };
+}
+
 describe("UI server (spec section 7)", () => {
   it("serves the page and the CLI help", async () => {
     const { server } = await setup();
@@ -267,6 +294,30 @@ describe("UI server (spec section 7)", () => {
     await postJson(server, "api/open-output", {});
 
     expect(readdirSync(input)).toEqual(before);
+  });
+
+  it("pushes a fresh list after a conversion, without a manual rescan", async () => {
+    const { server } = await setup({ fixture: "zero-offset" });
+    const stream = await openStream(server);
+
+    await postJson(server, "api/scan", { options: {} });
+    await postJson(server, "api/convert", { options: {} });
+
+    expect(await waitFor(() => stream.text().includes('"converted":true'), 6000)).toBe(true);
+    await stream.stop();
+
+    expect(stream.text()).toContain("event: scan");
+  });
+
+  it("follows INPUT/ while it runs", async () => {
+    const { server, input } = await setup();
+    const stream = await openStream(server);
+
+    await postJson(server, "api/scan", { options: {} });
+    cpSync(songFixture("zero-offset"), join(input, "Added Later"), { recursive: true });
+
+    expect(await waitFor(() => stream.text().includes("Added Later"), 6000)).toBe(true);
+    await stream.stop();
   });
 });
 

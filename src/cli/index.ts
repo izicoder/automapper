@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { basename } from "node:path";
 
+import { appendToLogFile, prepareLogFile } from "../log-file.js";
 import { Logger } from "../log.js";
 import { discover } from "../package/layout.js";
 import { ensureInputDir, ensureOutputDir } from "../paths.js";
@@ -61,12 +62,24 @@ export function run(
 /** Entry point: runs the conversion and sets the exit code (spec section 11). */
 export function main(
   argv: readonly string[] = process.argv.slice(2),
-  logger: Logger = new Logger(),
+  logger?: Logger,
   dirs?: RunDirs,
 ): number {
-  const result = run(argv, logger, dirs);
+  const result = run(argv, logger ?? createCliLogger(), dirs);
   // Any skipped song is a partial failure, and the exit code must say so.
   return result.failed > 0 ? 1 : 0;
+}
+
+/**
+ * The CLI writes to the terminal and mirrors everything into automapper.log,
+ * which survives restarts so errors can be read back later.
+ */
+function createCliLogger(): Logger {
+  prepareLogFile();
+  return new Logger("info", (line) => {
+    process.stdout.write(`${line}\n`);
+    appendToLogFile(line);
+  });
 }
 
 // Only run when invoked directly, not when imported by tests.
