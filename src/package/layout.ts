@@ -17,19 +17,33 @@ export interface Discovery {
   packs: PackEntry[];
   /** Loose chart files dropped straight into INPUT/ (spec section 5). */
   loose: string[];
+  /** Zip archives waiting to be unpacked. */
+  archives: string[];
+  /** Archives this build cannot open (.7z, .rar, ...). */
+  unsupportedArchives: string[];
   /** Anything that could not be recognised, for a log line. */
   skipped: string[];
 }
 
 const CHART = new Set([".sm", ".ssc"]);
+const ARCHIVE = new Set([".zip"]);
+const UNSUPPORTED_ARCHIVE = new Set([".7z", ".rar", ".tar", ".gz", ".tgz", ".bz2", ".xz"]);
 
 /**
  * Walks INPUT/ (spec section 5): a folder with a chart file is a song, a
  * folder with song folders is a pack, depth is two layers, loose chart files
- * become one-file songs. INPUT/ is only ever read.
+ * become one-file songs, zip archives are unpacked later. INPUT/ is only ever
+ * read.
  */
 export function discover(inputDir: string): Discovery {
-  const discovery: Discovery = { songs: [], packs: [], loose: [], skipped: [] };
+  const discovery: Discovery = {
+    songs: [],
+    packs: [],
+    loose: [],
+    archives: [],
+    unsupportedArchives: [],
+    skipped: [],
+  };
 
   let entries;
   try {
@@ -42,8 +56,16 @@ export function discover(inputDir: string): Discovery {
     const path = join(inputDir, entry.name);
 
     if (!entry.isDirectory()) {
-      if (CHART.has(extname(entry.name).toLowerCase())) discovery.loose.push(path);
-      else discovery.skipped.push(path);
+      const extension = extname(entry.name).toLowerCase();
+      if (CHART.has(extension)) {
+        discovery.loose.push(path);
+      } else if (ARCHIVE.has(extension)) {
+        discovery.archives.push(path);
+      } else if (UNSUPPORTED_ARCHIVE.has(extension)) {
+        discovery.unsupportedArchives.push(path);
+      } else {
+        discovery.skipped.push(path);
+      }
       continue;
     }
 

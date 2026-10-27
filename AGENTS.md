@@ -23,6 +23,7 @@ repository is laid out and how to work in it.
 - `npm run convert` — run the CLI from source with `tsx`.
 - `npm run convert:built` — run the compiled CLI from `dist/`.
 - `npm run convert -- --keys 4,10,18` — CLI flags go after `--`.
+- `npm run convert -- --force` — unpack and convert archives again.
 
 ## Testing
 
@@ -33,6 +34,22 @@ pack discovery, encodings, CLI end to end, and the automapper across 1K-18K.
 Importing a generated `.osz` into osu! is a manual check; the writer is
 verified against the real file format instead (field counts, types, x
 positions, ordering).
+
+## Archives in INPUT/
+
+Dropping `.zip` files straight into `INPUT/` works like dropping folders:
+each one is unpacked into a temporary folder, converted, and the temporary
+copy is deleted, so no unpacked duplicates are left behind.
+
+- `OUTPUT/.archive-state.json` stores size, modification time and a settings
+  fingerprint per archive. A re-run skips archives that are unchanged, so
+  adding a new pack only processes the new one.
+- A replaced archive (different size or mtime) and changed settings both
+  count as new; `--force` reprocesses everything.
+- Only `.zip` is supported. `.7z`, `.rar` and friends are reported and
+  ignored; nested archives are not unpacked.
+- `INPUT/` itself is never written to; archive contents live in the OS temp
+  folder only while converting.
 
 ## Layout
 
@@ -65,7 +82,8 @@ src/
     note-mapping.ts Spec section 8 rules: what becomes a tap, an LN, or nothing.
     naming.ts     Content hashes, difficulty Version strings, .osz file names.
   package/        Output layout and packing.
-    layout.ts     Walks INPUT/: song folders, packs, loose files, junk.
+    layout.ts     Walks INPUT/: song folders, packs, loose files, archives.
+    archive.ts    .zip unpacking (zip-slip safe) and the converted-archive state.
     osz.ts        Builds one .osz per song with all difficulties and assets.
   cli/            Command-line entry point.
     options.ts    Argument parsing and the usage text.
@@ -147,6 +165,8 @@ and attribution are in `NOTICE`.
   git-ignored.
 - Never commit a converted pack or a source zip; they belong in `INPUT/` or
   `OUTPUT/`, both ignored.
+- Archive handling must never write into `INPUT/` and must always delete its
+  temporary unpack folder in a `finally`.
 
 ## Git
 

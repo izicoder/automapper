@@ -13,6 +13,8 @@ export interface CliOptions {
   rollTapBeats: number;
   /** Key count for charts with an unknown step type, or undefined to skip them. */
   assumeKeys?: number;
+  /** Re-unpack archives that were already converted. */
+  force: boolean;
   seed: number;
   verbose: boolean;
   help: boolean;
@@ -24,6 +26,7 @@ export const DEFAULT_OPTIONS: CliOptions = {
   stopEmulation: false,
   rollAsTaps: false,
   rollTapBeats: 0.25,
+  force: false,
   seed: 0,
   verbose: false,
   help: false,
@@ -79,6 +82,9 @@ export function parseArgs(argv: readonly string[]): CliOptions {
       case "--roll-taps":
         options.rollAsTaps = true;
         break;
+      case "--force":
+        options.force = true;
+        break;
       case "--seed":
         options.seed = Math.trunc(parseNumber(next(), arg));
         break;
@@ -126,6 +132,7 @@ Options:
   --keys <list>           also generate automapped difficulties, 1 to 18 keys
                           (e.g. 4 or 2,10,18)
   --assume-keys <n>       key count for charts with an unknown step type
+  --force                 unpack and convert archives again, even if unchanged
   --min-hold-beats <n>    holds shorter than n beats become taps (default 0.03125)
   --roll-taps             split rolls into a series of taps
   --roll-subdivision <n>  distance between those taps in beats (default 0.25)

@@ -26,11 +26,13 @@ function copySong(fixture: string, inputDir: string, folder: string): void {
 }
 
 describe("INPUT discovery (spec section 5)", () => {
-  it("recognises a song folder, a pack, loose files and junk", () => {
+  it("recognises a song folder, a pack, loose files, archives and junk", () => {
     const input = scratch();
     copySong("zero-offset", input, "Song A");
     writeFileSync(join(input, "loose.sm"), "#TITLE:x;");
     writeFileSync(join(input, "notes.txt"), "ignore me");
+    writeFileSync(join(input, "pack.zip"), "not a real zip yet");
+    writeFileSync(join(input, "pack.rar"), "no rar support");
 
     const discovery = discover(input);
 
@@ -38,6 +40,8 @@ describe("INPUT discovery (spec section 5)", () => {
     expect(discovery.songs[0]!.directory).toBe(join(input, "Song A"));
     expect(discovery.packs).toEqual([]);
     expect(discovery.loose).toEqual([join(input, "loose.sm")]);
+    expect(discovery.archives).toEqual([join(input, "pack.zip")]);
+    expect(discovery.unsupportedArchives).toEqual([join(input, "pack.rar")]);
     expect(discovery.skipped).toEqual([join(input, "notes.txt")]);
   });
 
@@ -68,6 +72,13 @@ describe("INPUT discovery (spec section 5)", () => {
 
   it("does not throw when INPUT/ is missing", () => {
     const discovery = discover(join(scratch(), "does-not-exist"));
-    expect(discovery).toEqual({ songs: [], packs: [], loose: [], skipped: [] });
+    expect(discovery).toEqual({
+      songs: [],
+      packs: [],
+      loose: [],
+      archives: [],
+      unsupportedArchives: [],
+      skipped: [],
+    });
   });
 });

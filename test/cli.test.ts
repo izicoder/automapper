@@ -6,9 +6,10 @@
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { unzipSync } from "fflate";
+import { unzipSync, zipSync } from "fflate";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildCharts, main, run } from "../src/cli/index.js";
@@ -38,6 +39,21 @@ function setupPack(): { input: string; output: string } {
   mkdirSync(input, { recursive: true });
   cpSync(packFixture("demo-pack"), join(input, "Demo Pack"), { recursive: true });
   return { input, output };
+}
+
+/** Builds a .zip whose entries are `folder/<files of the fixture>`. */
+function zipFixtureSong(zipPath: string, folder: string, fixture: string): void {
+  const entries: Record<string, Uint8Array> = {};
+  for (const name of readdirSync(songFixture(fixture))) {
+    entries[`${folder}/${name}`] = readFileSync(join(songFixture(fixture), name));
+  }
+  writeFileSync(zipPath, zipSync(entries));
+}
+
+function outputFiles(outputDir: string): string[] {
+  return readdirSync(outputDir)
+    .filter((name) => name !== ".archive-state.json")
+    .sort();
 }
 
 describe("CLI end to end (spec sections 5, 7 and 11)", () => {
@@ -242,6 +258,144 @@ describe("CLI end to end (spec sections 5, 7 and 11)", () => {
     expect(lines.some((line) => line.includes("20K is not an osu!mania key count, mapped to 18K"))).toBe(
       true,
     );
+  });
+});
+
+describe("archives dropped into INPUT/ (spec section 5)", () => {
+  function setupArchive(fixture = "zero-offset"): { input: string; output: string; zip: string } {
+    const root = scratch("cli-zip-");
+    const input = join(root, "INPUT");
+    const output = join(root, "OUTPUT");
+    mkdirSync(input, { recursive: true });
+    const zip = join(input, "song.zip");
+    zipFixtureSong(zip, "Zero Offset", fixture);
+    return { input, output, zip };
+  }
+
+  it("unpacks a single-song archive and writes one .osz", () => {
+    const dirs = setupArchive();
+    const { logger, lines } = createTestLogger();
+
+    expect(run([], logger, dirs)).toEqual({ converted: 1, failed: 0 });
+
+    expect(outputFiles(dirs.output)).toHaveLength(1);
+    expect(outputFiles(dirs.output)[0]).toMatch(/^Fixture - Zero Offset \[[0-9a-f]{6}\]\.osz$/);
+    expect(lines.some((line) => line.includes("unpacking archive"))).toBe(true);
+    expect(lines.some((line) => line.includes("nested archive"))).toBe(false);
+    expect(existsSync(join(dirs.output, ".archive-state.json"))).toBe(true);
+  });
+
+  it("does not unpack the same archive twice", () => {
+    const dirs = setupArchive();
+    const first = run([], createTestLogger().logger, dirs);
+    expect(first).toEqual({ converted: 1, failed: 0 });
+
+    const { logger, lines } = createTestLogger();
+    const second = run([], logger, dirs);
+
+    expect(second).toEqual({ converted: 0, failed: 0 });
+    expect(lines.some((line) => line.includes("already converted"))).toBe(true);
+    expect(outputFiles(dirs.output)).toHaveLength(1);
+  });
+
+  it("unpacks only the archives that are new", () => {
+    const dirs = setupArchive();
+    run([], createTestLogger().logger, dirs);
+
+    zipFixtureSong(join(dirs.input, "second.zip"), "Positive Offset", "positive-offset");
+    const { logger, lines } = createTestLogger();
+    expect(run([], logger, dirs)).toEqual({ converted: 1, failed: 0 });
+
+    expect(lines.filter((line) => line.includes("unpacking archive"))).toHaveLength(1);
+    expect(lines.some((line) => line.includes("already converted"))).toBe(true);
+    expect(outputFiles(dirs.output)).toHaveLength(2);
+  });
+
+  it("unpacks an archive again after it was replaced", () => {
+    const dirs = setupArchive();
+    run([], createTestLogger().logger, dirs);
+
+    // Same file name, different content and size -> new stamp.
+    zipFixtureSong(dirs.zip, "Negative Offset", "negative-offset");
+    expect(run([], createTestLogger().logger, dirs)).toEqual({ converted: 1, failed: 0 });
+  });
+
+  it("unpacks an archive again when the settings change", () => {
+    const dirs = setupArchive();
+    run(["--seed", "0"], createTestLogger().logger, dirs);
+
+    expect(run(["--seed", "1"], createTestLogger().logger, dirs)).toEqual({
+      converted: 1,
+      failed: 0,
+    });
+    // Different settings produce a different name, so both results stay.
+    expect(outputFiles(dirs.output)).toHaveLength(2);
+  });
+
+  it("re-unpacks on --force", () => {
+    const dirs = setupArchive();
+    run([], createTestLogger().logger, dirs);
+
+    const { logger, lines } = createTestLogger();
+    expect(run(["--force"], logger, dirs)).toEqual({ converted: 1, failed: 0 });
+    expect(lines.some((line) => line.includes("unpacking archive"))).toBe(true);
+  });
+
+  it("converts song folders at the archive root like song folders in INPUT/", () => {
+    const root = scratch("cli-zip-pack-");
+    const input = join(root, "INPUT");
+    const output = join(root, "OUTPUT");
+    mkdirSync(input, { recursive: true });
+
+    const entries: Record<string, Uint8Array> = {};
+    for (const fixture of ["zero-offset", "positive-offset"]) {
+      const folder = fixture === "zero-offset" ? "Song A" : "Song B";
+      for (const name of readdirSync(songFixture(fixture))) {
+        entries[`${folder}/${name}`] = readFileSync(join(songFixture(fixture), name));
+      }
+    }
+    writeFileSync(join(input, "My Pack.zip"), zipSync(entries));
+
+    expect(run([], createTestLogger().logger, { input, output })).toEqual({
+      converted: 2,
+      failed: 0,
+    });
+
+    // Same rule as folders directly in INPUT/: these are two songs.
+    expect(outputFiles(output)).toHaveLength(2);
+  });
+
+  it("keeps a pack folder from inside the archive", () => {
+    const root = scratch("cli-zip-wrapped-");
+    const input = join(root, "INPUT");
+    const output = join(root, "OUTPUT");
+    mkdirSync(input, { recursive: true });
+
+    const entries: Record<string, Uint8Array> = {};
+    for (const fixture of ["zero-offset", "positive-offset"]) {
+      const folder = fixture === "zero-offset" ? "Song A" : "Song B";
+      for (const name of readdirSync(songFixture(fixture))) {
+        entries[`My Pack/${folder}/${name}`] = readFileSync(join(songFixture(fixture), name));
+      }
+    }
+    writeFileSync(join(input, "collection.zip"), zipSync(entries));
+
+    expect(run([], createTestLogger().logger, { input, output })).toEqual({
+      converted: 2,
+      failed: 0,
+    });
+
+    expect(readdirSync(output)).toContain("My Pack");
+    expect(readdirSync(join(output, "My Pack"))).toHaveLength(2);
+  });
+
+  it("reports a broken archive without stopping the rest", () => {
+    const dirs = setupArchive();
+    writeFileSync(join(dirs.input, "broken.zip"), "this is not a zip");
+    const { logger, lines } = createTestLogger();
+
+    expect(run([], logger, dirs)).toEqual({ converted: 1, failed: 1 });
+    expect(lines.some((line) => line.includes("archive failed"))).toBe(true);
   });
 });
 

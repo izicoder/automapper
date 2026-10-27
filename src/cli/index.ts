@@ -1,15 +1,27 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 import { Logger } from "../log.js";
-import { discover, type SongEntry } from "../package/layout.js";
+import { discover, type Discovery, type SongEntry } from "../package/layout.js";
 import { packageSong } from "../package/osz.js";
+import {
+  ARCHIVE_STATE_FILE,
+  archiveStamp,
+  extractZip,
+  isArchiveProcessed,
+  readArchiveState,
+  settingsFingerprint,
+  writeArchiveState,
+  type ArchiveStamp,
+} from "../package/archive.js";
 import { chartSettingsHash, setFileName, setSettingsHash } from "../osu/naming.js";
 import { ensureInputDir, ensureOutputDir } from "../paths.js";
 import { loadStepManiaSong } from "../parsers/stepmania.js";
 import type { Chart, Song } from "../ir/types.js";
 import { automapChart } from "../transform/automap.js";
 import { nearestLegalKeyCount } from "../keys.js";
+import { CONVERTER_VERSION } from "../version.js";
 import { CliError, parseArgs, USAGE, type CliOptions } from "./options.js";
 
 export interface RunResult {
@@ -26,6 +38,11 @@ export interface RunDirs {
 /**
  * Converts everything in INPUT/ into OUTPUT/ (spec sections 2 and 11).
  * One bad song is skipped with a log line; it never aborts a pack.
+ *
+ * Zip archives in INPUT/ are unpacked into a temporary folder, converted and
+ * removed again. A small state file in OUTPUT/ remembers which archive was
+ * already converted with which settings, so a re-run only touches new or
+ * changed archives (spec section 7, idempotence).
  */
 export function run(
   argv: readonly string[],
@@ -52,8 +69,8 @@ export function run(
   const inputDir = dirs.input;
   const outputDir = dirs.output;
   mkdirSync(outputDir, { recursive: true });
-  const discovery = discover(inputDir);
 
+  const discovery = discover(inputDir);
   const settings: Record<string, unknown> = {
     keys: options.keys,
     minHoldBeats: options.minHoldBeats,
@@ -64,6 +81,34 @@ export function run(
     seed: options.seed,
   };
 
+  let converted = 0;
+  let failed = 0;
+  const record = (result: RunResult): void => {
+    converted += result.converted;
+    failed += result.failed;
+  };
+
+  record(convertDiscovery(discovery, outputDir, settings, options, logger));
+
+  for (const archive of discovery.archives) {
+    record(convertArchive(archive, outputDir, settings, options, logger));
+  }
+  for (const archive of discovery.unsupportedArchives) {
+    logger.warn(`unsupported archive, unpack it yourself: ${basename(archive)}`);
+  }
+
+  logger.info(`${converted} songs converted, ${failed} skipped`);
+  return { converted, failed };
+}
+
+/** Converts one discovery result: songs, packs and loose chart files. */
+function convertDiscovery(
+  discovery: Discovery,
+  outputDir: string,
+  settings: Record<string, unknown>,
+  options: CliOptions,
+  logger: Logger,
+): RunResult {
   let converted = 0;
   let failed = 0;
 
@@ -99,8 +144,74 @@ export function run(
     failed += result.failed;
   }
 
-  logger.info(`${converted} songs converted, ${failed} skipped`);
   return { converted, failed };
+}
+
+/**
+ * Unpacks one archive, converts its contents and removes the unpacked copy.
+ * Archives already converted with the same settings are skipped, so adding a
+ * new pack does not reprocess the old ones.
+ */
+function convertArchive(
+  archivePath: string,
+  outputDir: string,
+  settings: Record<string, unknown>,
+  options: CliOptions,
+  logger: Logger,
+): RunResult {
+  const label = basename(archivePath);
+  const stamp: ArchiveStamp = {
+    ...archiveStamp(archivePath),
+    settings: settingsFingerprint(settings, CONVERTER_VERSION),
+  };
+  const statePath = join(outputDir, ARCHIVE_STATE_FILE);
+  const state = readArchiveState(statePath);
+
+  if (!options.force && isArchiveProcessed(state, archivePath, stamp)) {
+    logger.info("archive already converted, skipping", label);
+    return { converted: 0, failed: 0 };
+  }
+
+  const unpackDir = mkdtempSync(join(tmpdir(), "automapper-unpack-"));
+  try {
+    logger.info("unpacking archive", label);
+    const extracted = extractZip(archivePath, unpackDir);
+    for (const entry of extracted.skipped) {
+      logger.warn(`skipped unsafe archive entry: ${entry}`, label);
+    }
+
+    const discovery = discover(unpackDir);
+    if (discovery.archives.length > 0) {
+      logger.warn(
+        `${discovery.archives.length} nested archive(s) ignored: unpack them into INPUT/`,
+        label,
+      );
+    }
+    if (discovery.unsupportedArchives.length > 0) {
+      logger.warn(
+        `${discovery.unsupportedArchives.length} unsupported archive(s) ignored: only .zip is supported`,
+        label,
+      );
+    }
+    if (
+      discovery.songs.length === 0 &&
+      discovery.packs.length === 0 &&
+      discovery.loose.length === 0
+    ) {
+      logger.warn("archive has no songs", label);
+    }
+
+    const result = convertDiscovery(discovery, outputDir, settings, options, logger);
+
+    state[archivePath] = stamp;
+    writeArchiveState(statePath, state);
+    return result;
+  } catch (error) {
+    logger.error(`archive failed: ${(error as Error).message}`, label);
+    return { converted: 0, failed: 1 };
+  } finally {
+    rmSync(unpackDir, { recursive: true, force: true });
+  }
 }
 
 function convertSong(
@@ -186,16 +297,6 @@ export function buildCharts(
   }
 
   return charts;
-}
-
-/** Turns an automapper warning into a log line without losing the chart name. */
-export function logAutomapWarnings(
-  warnings: readonly string[],
-  chartName: string,
-  logger: Logger,
-  context?: string,
-): void {
-  for (const warning of warnings) logger.warn(`${chartName}: ${warning}`, context);
 }
 
 function safeName(name: string): string {

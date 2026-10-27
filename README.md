@@ -2,8 +2,10 @@
 
 StepMania (`.sm`/`.ssc`) to osu!mania converter with key-count automapping.
 
-Drop songs or packs into `INPUT/`, run the converter, take the `.osz` files
-from `OUTPUT/`.
+Drop songs, packs, or `.zip` archives of them into `INPUT/`, run the
+converter, take the `.osz` files from `OUTPUT/`. Archives are unpacked into a
+temporary folder and deleted again; a re-run skips archives that did not
+change (`--force` reprocesses them).
 
 ```
 npm install
