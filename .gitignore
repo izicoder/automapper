@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# tool output (never committed)
+INPUT/
+OUTPUT/
+coverage/
+
+# source packs / large binaries kept locally only
+*.zip
+*.osz
+
+# os / editor noise
+Thumbs.db
+.DS_Store

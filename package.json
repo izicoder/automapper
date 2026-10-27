@@ -1,0 +1,27 @@
+{
+  "name": "automapper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Universal osu!mania converter and automapper: StepMania (.sm/.ssc) to .osz",
+  "type": "module",
+  "bin": {
+    "converter": "dist/cli/index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "convert": "tsx src/cli/index.ts",
+    "convert:built": "node dist/cli/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0"
+  }
+}
