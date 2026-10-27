@@ -4,7 +4,7 @@ import { extname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 
-import { runJobs, type ConversionJob } from "../cli/jobs.js";
+import { runJobs, selectJobs, type ConversionJob } from "../cli/jobs.js";
 import {
   argvFromOptions,
   CliError,
@@ -199,11 +199,11 @@ export function startUiServer(options: UiServerOptions): Promise<UiServer> {
     const selected = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
     if (lastScan === null) scanNow(values);
 
-    let jobs = pickJobs(lastJobs, selected);
+    let jobs = selectJobs(lastJobs, selected);
     if (jobs.length === 0 && selected.length > 0) {
       // The selection outlived the last scan (a drop or a new folder): rescan.
       scanNow(values);
-      jobs = pickJobs(lastJobs, selected);
+      jobs = selectJobs(lastJobs, selected);
     }
     if (jobs.length === 0) throw new HttpError(400, "nothing to convert");
 
@@ -403,12 +403,6 @@ function formValues(body: unknown): FormValues | undefined {
   if (body === null || typeof body !== "object") return undefined;
   const options = (body as Record<string, unknown>)["options"];
   return options !== null && typeof options === "object" ? (options as FormValues) : undefined;
-}
-
-function pickJobs(jobs: readonly ConversionJob[], ids: readonly string[]): ConversionJob[] {
-  if (ids.length === 0) return [...jobs];
-  const wanted = new Set(ids);
-  return jobs.filter((job) => wanted.has(job.id));
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {

@@ -1,11 +1,18 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 
-import { isInside, jobsFromDiscovery, safeName, type ConversionJob, type JobKind } from "../cli/jobs.js";
-import { settingsOf } from "../cli/jobs.js";
+import {
+  INNER_SEPARATOR,
+  isInside,
+  jobsFromDiscovery,
+  safeName,
+  settingsOf,
+  type ConversionJob,
+  type JobKind,
+} from "../cli/jobs.js";
 import type { CliOptions } from "../cli/options.js";
 import type { Chart } from "../ir/types.js";
-import { setFileName, setSettingsHash } from "../osu/naming.js";
+import { fileNameFor, setFileName, setSettingsHash, settingsHashOf } from "../osu/naming.js";
 import {
   ARCHIVE_STATE_FILE,
   archiveStamp,
@@ -16,6 +23,7 @@ import {
 import { discover, type Discovery } from "../package/layout.js";
 import { loadStepManiaSong } from "../parsers/stepmania.js";
 import { CONVERTER_VERSION } from "../version.js";
+import { peekArchive, type ArchiveSong } from "./archive-scan.js";
 
 /** One chart as the left panel shows it, before any conversion happens. */
 export interface ScannedChart {
@@ -33,6 +41,8 @@ export interface ScannedSong {
   label: string;
   pack?: string;
   origin: ScanOrigin;
+  /** Archive this song lives in, when it is not a folder on disk. */
+  archive?: string;
   title?: string;
   artist?: string;
   charts: ScannedChart[];
@@ -50,6 +60,10 @@ export interface ScannedArchive {
   origin: ScanOrigin;
   /** True when the archive was already unpacked with these settings. */
   converted: boolean;
+  /** Songs the archive holds, counted without unpacking it. */
+  songCount: number;
+  /** Set when the zip cannot be read at all. */
+  error?: string;
 }
 
 export interface ScannedIgnored {
@@ -107,6 +121,12 @@ export function scan(options: ScanOptions): { result: ScanResult; jobs: Conversi
 
     for (const job of sourceJobs) {
       if (job.kind === "archive") {
+        const contents = peekArchive(job.id, {
+          ...(options.options.assumeKeys === undefined
+            ? {}
+            : { assumeKeys: options.options.assumeKeys }),
+        });
+
         result.archives.push({
           id: job.id,
           label: job.label,
@@ -115,7 +135,16 @@ export function scan(options: ScanOptions): { result: ScanResult; jobs: Conversi
             ...archiveStamp(job.id),
             settings: settingsFingerprint(settings, CONVERTER_VERSION),
           }),
+          songCount: contents.songs.length,
+          ...(contents.error === undefined ? {} : { error: contents.error }),
         });
+
+        for (const song of contents.songs) {
+          result.songs.push(archiveSong(job, song, origin, options, settings));
+        }
+        for (const entry of contents.ignored) {
+          result.ignored.push({ label: `${job.label}: ${entry}`, reason: "too deeply nested" });
+        }
         continue;
       }
 
@@ -187,6 +216,68 @@ function summarise(chart: Chart): ScannedChart {
     stepType: chart.meta.stepType,
     keyCount: chart.keyCount,
     notes: chart.notes.length,
+  };
+}
+
+/**
+ * A song that lives inside an archive. Its id carries the song folder inside
+ * the zip, so one song can be converted without unpacking the rest.
+ * The expected .osz name uses the same hash code as the writer.
+ */
+function archiveSong(
+  job: ConversionJob,
+  song: ArchiveSong,
+  origin: ScanOrigin,
+  scanOptions: ScanOptions,
+  settings: Record<string, unknown>,
+): ScannedSong {
+  const base = {
+    id: `${job.id}${INNER_SEPARATOR}${song.inner}`,
+    kind: song.pack === undefined ? ("song" as const) : ("pack-song" as const),
+    label: song.label,
+    origin,
+    archive: job.id,
+    converted: false,
+    ...(song.pack === undefined ? {} : { pack: song.pack }),
+  };
+
+  if (song.error !== undefined || song.charts.length === 0) {
+    return {
+      ...base,
+      charts: [],
+      warnings: song.warnings,
+      error: song.error ?? "cannot be converted",
+    };
+  }
+
+  const expectedOsz = fileNameFor(
+    song.artist ?? "",
+    song.title ?? "",
+    settingsHashOf(
+      {
+        title: song.title ?? "",
+        artist: song.artist ?? "",
+        chartTexts: song.charts.map((chart) => chart.sourceText),
+      },
+      settings,
+    ),
+  );
+  const outputDir =
+    song.pack === undefined ? scanOptions.outputDir : join(scanOptions.outputDir, safeName(song.pack));
+
+  return {
+    ...base,
+    title: song.title,
+    artist: song.artist,
+    charts: song.charts.map((chart) => ({
+      name: chart.name,
+      stepType: chart.stepType,
+      keyCount: chart.keyCount,
+      notes: chart.notes,
+    })),
+    warnings: song.warnings,
+    expectedOsz,
+    converted: existsSync(join(outputDir, expectedOsz)),
   };
 }
 

@@ -47,6 +47,11 @@ export interface ConversionJob {
    * state file, since its staged path disappears with the staging folder.
    */
   transient?: boolean;
+  /**
+   * For archives: only convert these songs (folders inside the zip, forward
+   * slashes). Undefined converts the whole archive.
+   */
+  songs?: string[];
 }
 
 /**
@@ -105,6 +110,45 @@ export function jobsFromDiscovery(
   }
 
   return jobs;
+}
+
+/** Separates an archive path from a song folder inside it. */
+export const INNER_SEPARATOR = "::";
+
+/**
+ * Picks the jobs a selection refers to. Plain ids select one job; an id of the
+ * form `archive::song/folder` selects a single song inside an archive, which
+ * still unpacks the archive only once (spec 7).
+ */
+export function selectJobs(
+  jobs: readonly ConversionJob[],
+  ids: readonly string[],
+): ConversionJob[] {
+  if (ids.length === 0) return [...jobs];
+
+  const wanted = new Set(ids);
+  const innerByArchive = new Map<string, string[]>();
+
+  for (const id of ids) {
+    const split = id.indexOf(INNER_SEPARATOR);
+    if (split <= 0) continue;
+    const archive = id.slice(0, split);
+    const inner = id.slice(split + INNER_SEPARATOR.length);
+    const list = innerByArchive.get(archive);
+    if (list === undefined) innerByArchive.set(archive, [inner]);
+    else if (!list.includes(inner)) list.push(inner);
+  }
+
+  const picked: ConversionJob[] = [];
+  for (const job of jobs) {
+    if (wanted.has(job.id)) {
+      picked.push(job);
+      continue;
+    }
+    const songs = innerByArchive.get(job.id);
+    if (songs !== undefined) picked.push({ ...job, songs });
+  }
+  return picked;
 }
 
 /** Converts every job once, reporting progress after each one. */
@@ -243,9 +287,22 @@ function convertArchiveJob(
 
     // Archives inside archives are ignored (spec section 5).
     const innerJobs = jobsFromDiscovery(discovery).filter((inner) => inner.kind !== "archive");
-    const result = runJobs(innerJobs, options, dirs, logger);
+    const selected =
+      job.songs === undefined
+        ? innerJobs
+        : innerJobs.filter((inner) => job.songs!.includes(relativeTo(unpackDir, inner)));
+    if (job.songs !== undefined && selected.length < innerJobs.length) {
+      logger.info(
+        `partial selection: ${selected.length} of ${innerJobs.length} songs`,
+        job.label,
+      );
+    }
+    const result = runJobs(selected, options, dirs, logger);
 
-    if (!job.transient) {
+    // Only an archive whose songs all ran counts as unpacked, so a partly
+    // converted zip is processed again instead of being skipped (spec 7).
+    const complete = job.songs === undefined || selected.length === innerJobs.length;
+    if (!job.transient && complete) {
       state[job.id] = stamp;
       writeArchiveState(statePath, state);
     }
@@ -280,4 +337,13 @@ export function safeName(name: string): string {
 export function isInside(path: string, root: string): boolean {
   const normalise = (value: string): string => value.replace(/\\/g, "/").replace(/\/+$/, "");
   return normalise(path).startsWith(`${normalise(root)}/`);
+}
+
+/** A song's folder inside an unpacked archive, with forward slashes. */
+export function relativeTo(root: string, job: ConversionJob): string {
+  const base = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  const path =
+    job.chartFile === undefined ? job.directory : `${job.directory}/${job.chartFile}`;
+  const normalised = path.replace(/\\/g, "/");
+  return normalised.startsWith(`${base}/`) ? normalised.slice(base.length + 1) : normalised;
 }

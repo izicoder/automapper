@@ -10,6 +10,8 @@ const state = {
   scan: null,
   deselected: new Set(),
   convertedNow: new Set(),
+  /** Group key -> open, for groups the user toggled (archives start closed). */
+  open: new Map(),
   pendingIds: [],
   running: false,
   scanning: false,
@@ -65,8 +67,12 @@ function syncCommand() {
 
 /* ------------------------------------------------------------------ list */
 
+/**
+ * Every selectable entry is a song: a song inside an archive is selected by
+ * its own id, so one song of a zip converts without the rest (spec 7).
+ */
 function allIds(scan) {
-  return [...scan.songs.map((song) => song.id), ...scan.archives.map((archive) => archive.id)];
+  return scan.songs.map((song) => song.id);
 }
 
 function isSelected(id) {
@@ -91,37 +97,63 @@ function render() {
     list.append(hint("Nothing in INPUT/ and nothing dropped yet."));
   }
 
+  // Songs that live inside an archive are shown under that archive instead.
   const groups = new Map();
   for (const song of scan.songs) {
-    const key = `${song.origin}|${song.pack ?? ""}`;
-    if (!groups.has(key)) groups.set(key, { origin: song.origin, pack: song.pack, songs: [] });
+    if (song.archive !== undefined) continue;
+    const key = `folder|${song.origin}|${song.pack ?? ""}`;
+    if (!groups.has(key)) {
+      groups.set(key, { key, origin: song.origin, pack: song.pack, songs: [] });
+    }
     groups.get(key).songs.push(song);
   }
 
   for (const group of groups.values()) {
-    const section = document.createElement("section");
-    section.className = "group";
-
-    const heading = document.createElement("h3");
-    heading.append(group.pack ? `pack · ${group.pack}` : "loose songs");
-    const origin = document.createElement("span");
-    origin.className = "chip";
-    origin.textContent = group.origin === "drop" ? "dropped" : "input";
-    heading.append(origin);
-    section.append(heading);
-
-    for (const song of group.songs) section.append(songRow(song));
-    list.append(section);
+    const title = group.pack ? `pack · ${group.pack}` : "loose songs";
+    list.append(
+      collapsible(group.key, title, group.origin, group.songs.map((song) => songRow(song))),
+    );
   }
 
-  if (scan.archives.length > 0) {
-    const section = document.createElement("section");
-    section.className = "group";
-    const heading = document.createElement("h3");
-    heading.append("archives");
-    section.append(heading);
-    for (const archive of scan.archives) section.append(archiveRow(archive));
-    list.append(section);
+  for (const archive of scan.archives) {
+    const songs = scan.songs.filter((song) => song.archive === archive.id);
+    const ids = songs.map((song) => song.id);
+    const selected = ids.filter(isSelected).length;
+
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.dataset.archive = archive.id;
+    box.checked = ids.length > 0 && selected === ids.length;
+    box.indeterminate = selected > 0 && selected < ids.length;
+    box.disabled = ids.length === 0;
+    box.title = "Select every song in this archive";
+    box.addEventListener("change", () => {
+      selectMany(ids, box.checked);
+      syncSelection();
+    });
+
+    const chips = [chip("zip", "source")];
+    if (archive.converted) chips.push(chip("already unpacked", "done"));
+    if (archive.error !== undefined) {
+      const error = chip(archive.error, "error");
+      error.title = archive.error;
+      chips.push(error);
+    }
+
+    const rows = songs.map((song) => {
+      const row = songRow(song);
+      row.classList.add("nested");
+      return row;
+    });
+
+    list.append(
+      collapsible(`archive|${archive.id}`, archive.label, archive.origin, rows, {
+        control: box,
+        chips,
+        // An archive can hold a hundred songs: keep it closed until asked.
+        collapsed: true,
+      }),
+    );
   }
 
   if (scan.ignored.length > 0) {
@@ -153,6 +185,62 @@ function render() {
   );
 }
 
+/**
+ * A collapsible group. Its open state survives a re-render: groups the user
+ * touched remember it, everything else uses the group's default.
+ */
+function collapsible(key, title, origin, rows, options = {}) {
+  const section = document.createElement("section");
+  section.className = "group";
+
+  const head = document.createElement("div");
+  head.className = "group-head";
+
+  const caret = document.createElement("button");
+  caret.type = "button";
+  caret.className = "caret";
+  const collapsed = !(state.open.get(key) ?? !options.collapsed);
+  caret.textContent = collapsed ? "▸" : "▾";
+  caret.title = collapsed ? "Expand" : "Collapse";
+  head.append(caret);
+
+  if (options.control !== undefined) head.append(options.control);
+
+  const label = document.createElement("span");
+  label.className = "group-title";
+  label.textContent = title;
+  head.append(label);
+
+  const originChip = chip(origin === "drop" ? "dropped" : "input", "");
+  head.append(originChip);
+
+  for (const extra of options.chips ?? []) head.append(extra);
+
+  const count = document.createElement("span");
+  count.className = "muted";
+  count.textContent = `${rows.length} ${rows.length === 1 ? "item" : "items"}`;
+  head.append(count);
+
+  head.addEventListener("click", (event) => {
+    if (event.target.closest("input")) return;
+    toggleGroup(key, collapsed);
+  });
+  section.append(head);
+
+  const body = document.createElement("div");
+  body.className = "group-body";
+  if (collapsed) body.classList.add("hidden");
+  for (const row of rows) body.append(row);
+  section.append(body);
+
+  return section;
+}
+
+function toggleGroup(key, open) {
+  state.open.set(key, open);
+  render();
+}
+
 function hint(text) {
   const div = document.createElement("div");
   div.className = "muted";
@@ -175,7 +263,7 @@ function songRow(song) {
   box.type = "checkbox";
   box.checked = isSelected(song.id);
   box.disabled = song.error !== undefined;
-  box.addEventListener("change", () => toggle(song.id, box.checked));
+  box.addEventListener("change", () => toggleAndSync(song.id, box.checked));
   head.append(box);
 
   const title = document.createElement("span");
@@ -189,6 +277,8 @@ function songRow(song) {
     sub.textContent = song.artist ? `${song.artist} — ${song.title}` : song.title;
     head.append(sub);
   }
+
+  if (song.pack !== undefined && song.archive !== undefined) head.append(chip(song.pack, ""));
 
   if (song.converted || state.convertedNow.has(song.id)) head.append(chip("in OUTPUT", "done"));
 
@@ -237,34 +327,6 @@ function chartLine(chart) {
   return line;
 }
 
-function archiveRow(archive) {
-  const row = document.createElement("div");
-  row.className = "row";
-  if (archive.converted) row.classList.add("converted");
-  row.dataset.id = archive.id;
-
-  const head = document.createElement("div");
-  head.className = "row-head";
-
-  const box = document.createElement("input");
-  box.type = "checkbox";
-  box.checked = isSelected(archive.id);
-  box.addEventListener("change", () => toggle(archive.id, box.checked));
-  head.append(box);
-
-  const title = document.createElement("span");
-  title.className = "row-title";
-  title.textContent = archive.label;
-  head.append(title);
-
-  head.append(chip("zip", "source"));
-  if (archive.origin === "drop") head.append(chip("dropped", "source"));
-  if (archive.converted) head.append(chip("already unpacked", "done"));
-
-  row.append(head);
-  return row;
-}
-
 function chip(text, kind) {
   const span = document.createElement("span");
   span.className = `chip ${kind}`.trim();
@@ -275,6 +337,43 @@ function chip(text, kind) {
 function toggle(id, checked) {
   if (checked) state.deselected.delete(id);
   else state.deselected.add(id);
+}
+
+/** Selects or deselects a whole group, used by the archive header box. */
+function selectMany(ids, checked) {
+  for (const id of ids) toggle(id, checked);
+}
+
+/** Re-applies the current selection to the boxes and the archive headers. */
+function syncSelection() {
+  const scan = state.scan;
+  if (scan === null) return;
+
+  for (const song of scan.songs) {
+    const box = $("list").querySelector(`[data-id="${cssEscape(song.id)}"] input`);
+    if (box !== null) box.checked = isSelected(song.id);
+  }
+
+  for (const archive of scan.archives) {
+    const ids = scan.songs.filter((song) => song.archive === archive.id).map((song) => song.id);
+    const selected = ids.filter(isSelected).length;
+    const box = $("list").querySelector(`input[data-archive="${cssEscape(archive.id)}"]`);
+    if (box === null) continue;
+    box.checked = ids.length > 0 && selected === ids.length;
+    box.indeterminate = selected > 0 && selected < ids.length;
+  }
+}
+
+function cssEscape(value) {
+  return typeof CSS !== "undefined" && typeof CSS.escape === "function"
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, "\\$&");
+}
+
+/** Applies a toggle made in one row to every other box showing that entry. */
+function toggleAndSync(id, checked) {
+  toggle(id, checked);
+  syncSelection();
 }
 
 /* ------------------------------------------------------------------ scan */
@@ -551,7 +650,6 @@ function setupControls() {
     });
   }
 
-  $("rescan").addEventListener("click", () => void loadScan());
   $("convert").addEventListener("click", () => void startConvert());
 
   $("select-all").addEventListener("click", () => {

@@ -240,6 +240,33 @@ describe("UI server (spec section 7)", () => {
     expect(outputFiles(output)[0]).toMatch(/\.osz$/);
   });
 
+  it("lists the songs inside an archive and converts one of them", async () => {
+    const { server, output } = await setup();
+    const entries: Record<string, Uint8Array> = {};
+    for (const [folder, fixture] of [
+      ["One", "zero-offset"],
+      ["Two", "positive-offset"],
+    ] as const) {
+      for (const name of readdirSync(songFixture(fixture))) {
+        entries[`${folder}/${name}`] = readFileSync(join(songFixture(fixture), name));
+      }
+    }
+    expect((await upload(server, "pack.zip", zipSync(entries))).status).toBe(200);
+
+    const scanned = await postJson(server, "api/scan", { options: {} });
+    const archives = scanned.data["archives"] as { id: string; songCount: number }[];
+    const songs = scanned.data["songs"] as { id: string; label: string }[];
+
+    expect(archives).toHaveLength(1);
+    expect(archives[0]!.songCount).toBe(2);
+    expect(songs.map((song) => song.label)).toEqual(["One", "Two"]);
+
+    await postJson(server, "api/convert", { options: {}, ids: [songs[1]!.id] });
+
+    expect(await waitFor(() => outputFiles(output).length === 1)).toBe(true);
+    expect(outputFiles(output)).toHaveLength(1);
+  });
+
   it("rejects options the CLI rejects, with the same message", async () => {
     const { server } = await setup();
 

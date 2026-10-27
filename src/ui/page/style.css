@@ -214,21 +214,50 @@ main {
 }
 
 /* Rows stay on one line and the panel scrolls sideways, like a store list. */
-.group h3 {
-  margin: 10px 4px 4px;
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 4px 2px;
+  padding: 2px 2px;
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
-  display: flex;
-  gap: 8px;
-  align-items: center;
   white-space: nowrap;
   width: max-content;
   min-width: 100%;
+  cursor: pointer;
+  user-select: none;
 }
 
-.group h3 .chip {
+.group-head:hover .group-title {
+  color: var(--text);
+}
+
+.group-title {
+  font-weight: 600;
+}
+
+.group-body.hidden {
+  display: none;
+}
+
+.caret {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 0 2px;
+  width: 18px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.row.nested {
+  margin-left: 18px;
+}
+
+.group-head .chip {
   text-transform: none;
   letter-spacing: 0;
 }

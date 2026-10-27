@@ -32,7 +32,8 @@ repository is laid out and how to work in it.
 `npm test` covers timing and offsets (1 ms tolerance), per-chart `.ssc`
 timing, note mapping, the written `.osu` structure, naming and idempotence,
 pack discovery, encodings, CLI end to end, the automapper across 1K-18K, and
-the UI's discovery, drop staging, output marks and HTTP endpoints.
+the UI's discovery, drop staging, output marks, archive contents and HTTP
+endpoints.
 
 Importing a generated `.osz` into osu! is a manual check; the writer is
 verified against the real file format instead (field counts, types, x
@@ -57,6 +58,13 @@ loopback only, and opens it in the browser. Layout is the one in spec section
   per-chart key counts. A row is marked "in OUTPUT" when the .osz name that
   `setSettingsHash`/`setFileName` would produce already exists. Real ones are
   green; automapped targets are amber (up) or violet (down).
+- Songs inside a `.zip` are listed under that archive without unpacking it.
+  `src/ui/archive-scan.ts` inflates only the chart entries (audio stays packed)
+  and caches the result per archive stamp. A listed song has its own id
+  (`archive::song/folder`, or `archive::chart.sm` at the root), so it can be
+  converted on its own; the archive is still unpacked once per run
+  (`selectJobs`/`relativeTo` in `src/cli/jobs.ts`), and the folder rows inside
+  an archive collapse with the archive.
 - Conversion runs in a worker thread (`src/ui/worker.ts`) so the page keeps
   answering; log lines and progress arrive over SSE (`GET /api/events`).
   The server falls back to in-process conversion if `dist/` was not built.
@@ -89,6 +97,9 @@ copy is deleted, so no unpacked duplicates are left behind.
 - `OUTPUT/.archive-state.json` stores size, modification time and a settings
   fingerprint per archive. A re-run skips archives that are unchanged, so
   adding a new pack only processes the new one.
+- A run that converts only some songs of an archive (a single row picked in the
+  UI) does not record the archive as done, so the rest can still be converted
+  later. A run that covers every song records it as usual.
 - A replaced archive (different size or mtime) and changed settings both
   count as new; `--force` reprocesses everything.
 - Only `.zip` is supported. `.7z`, `.rar` and friends are reported and
@@ -139,6 +150,7 @@ src/
   ui/             Local web UI (spec section 7).
     server.ts     node:http server, endpoints, SSE log stream, one run at a time.
     scan.ts       INPUT/ + dropped songs -> what the left panel lists.
+    archive-scan.ts  Songs inside a .zip, read without unpacking it.
     stage.ts      Temporary staging for dropped files, path sanitiser.
     worker.ts     Conversion in a worker thread, streams log lines and progress.
     protocol.ts   Worker request/message types.

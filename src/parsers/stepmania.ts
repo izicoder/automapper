@@ -1,11 +1,11 @@
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { extname, join } from "node:path";
 
 import { addBeats, parseBeat, ZERO_BEAT, type Beat } from "../ir/beat.js";
 import type { Chart, Note, Song, SongAssets, SongMetadata, TempoMap } from "../ir/types.js";
 import { TimingMap } from "../ir/timing.js";
 import { DIFFICULTY_LABELS, keyCountForStepType } from "./chart-types.js";
-import { decodeChartFile } from "./encoding.js";
+import { decodeChartBytes } from "./encoding.js";
 import { parseMsd, tagValue, type MsdTag } from "./msd.js";
 import { parseNoteData } from "./steps.js";
 
@@ -54,17 +54,45 @@ export interface LoadOptions {
 }
 
 /**
+ * One file of a song folder. `bytes` is only needed for chart files, so a
+ * folder read from a zip does not have to inflate its audio.
+ */
+export interface SongFile {
+  name: string;
+  bytes?: Uint8Array;
+}
+
+/**
  * Reads every .sm/.ssc file in a song folder and builds the IR song.
  *
  * Guesses (encoding, audio fallback, skipped chart) are returned as warnings
  * so the caller can log them (spec section 5).
  */
 export function loadStepManiaSong(songDir: string, options: LoadOptions = {}): LoadOutcome {
-  const warnings: string[] = [];
+  const files: SongFile[] = readdirSync(songDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => ({
+      name: entry.name,
+      ...(CHART_EXTENSIONS.has(extname(entry.name).toLowerCase())
+        ? { bytes: readFileSync(join(songDir, entry.name)) }
+        : {}),
+    }));
 
-  const entries = readdirSync(songDir, { withFileTypes: true });
-  const files = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
-  const chartFiles = (options.chartFile === undefined ? files : [options.chartFile])
+  return loadStepManiaFiles(songDir, files, options);
+}
+
+/**
+ * Same as `loadStepManiaSong`, but for files that are not on disk: the UI
+ * reads a song straight out of a zip to list it without unpacking (spec 7).
+ */
+export function loadStepManiaFiles(
+  songDir: string,
+  files: readonly SongFile[],
+  options: LoadOptions = {},
+): LoadOutcome {
+  const warnings: string[] = [];
+  const names = files.map((file) => file.name);
+  const chartFiles = (options.chartFile === undefined ? names : [options.chartFile])
     .filter((file) => CHART_EXTENSIONS.has(extname(file).toLowerCase()))
     // .ssc before .sm: when a folder holds both copies of the same song, the
     // newer format wins and the .sm copy is the one dropped as a duplicate.
@@ -81,7 +109,10 @@ export function loadStepManiaSong(songDir: string, options: LoadOptions = {}): L
   const seen = new Map<string, string>();
 
   for (const file of chartFiles) {
-    const decoded = decodeChartFile(join(songDir, file));
+    const source = files.find((candidate) => candidate.name === file);
+    if (source?.bytes === undefined) continue;
+
+    const decoded = decodeChartBytes(Buffer.from(source.bytes), file);
     if (decoded.warning) warnings.push(decoded.warning);
 
     const parsed = parseStepManiaText(decoded.text);
@@ -109,7 +140,7 @@ export function loadStepManiaSong(songDir: string, options: LoadOptions = {}): L
   }
 
   const metadata = metadataFromTags(songTags ?? []);
-  const assets = resolveAssets(songTags ?? [], files, warnings);
+  const assets = resolveAssets(songTags ?? [], names, warnings);
   if (assets === null) {
     return { song: null, warnings, reason: "no usable audio file" };
   }
