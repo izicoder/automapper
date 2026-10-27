@@ -40,12 +40,29 @@ src/
     steps.ts      StepMania note data (measures, holds, rolls, mines...).
   transform/      Automapper (key count N -> M). Not written yet.
   osu/            Beatmap writer. Never knows about source formats.
-  package/        .osz / folder layout. Not written yet.
-  cli/            Command-line entry point. Not written yet.
+    writer.ts     Song + chart -> .osu text (timing points, hit objects).
+    note-mapping.ts Spec section 8 rules: what becomes a tap, an LN, or nothing.
+    naming.ts     Content hashes, difficulty Version strings, .osz file names.
+  package/        Output layout and packing.
+    layout.ts     Walks INPUT/: song folders, packs, loose files, junk.
+    osz.ts        Builds one .osz per song with all difficulties and assets.
+  cli/            Command-line entry point.
+    options.ts    Argument parsing and the usage text.
+    index.ts      run(): discovery -> parse -> package, one log line per event.
 test/             Vitest tests (`*.test.ts`) plus committed fixtures.
+  fixtures/songs/ One folder per source-edge fixture, loaded by the parser tests.
+  fixtures/packs/ One pack fixture: same-title songs plus a deliberately broken one.
+  osu-format.ts   Tiny .osu reader used by the writer and package tests.
 INPUT/            Everything to convert. Never modified by the tool. Git-ignored.
 OUTPUT/           Everything the tool produces. Git-ignored.
 ```
+
+## Status
+
+Done: StepMania parsing, timing, IR, osu writer, .osz packaging, CLI, tests.
+Not done yet (spec v1): automapper (`--keys`), stop emulation (`--stop-emulation`),
+roll-as-taps (`--roll-taps`), BMS input (v1.1), UI. The CLI logs a warning when
+one of the unfinished options is passed rather than silently ignoring it.
 
 ## Conventions
 

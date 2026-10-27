@@ -1,0 +1,20 @@
+#TITLE:Same Song;
+#ARTIST:Same Artist;
+#CREDIT:tester;
+#MUSIC:song.mp3;
+#OFFSET:0;
+#BPMS:0=120;
+#NOTES:
+     dance-single:
+     :
+     Hard:
+     7:
+     :
+     0,0,0,0,0:
+0010
+0010
+0100
+,
+1000
+0001
+;
