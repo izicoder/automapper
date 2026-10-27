@@ -2,19 +2,29 @@
 
 StepMania (`.sm`/`.ssc`) to osu!mania converter with key-count automapping.
 
-Drop songs, packs, or `.zip` archives of them into `INPUT/`, convert them, and
-take the `.osz` files from `OUTPUT/`. Archives are unpacked into a temporary
-folder and deleted again; a re-run skips archives that did not change
-(`--force` reprocesses them).
+## Download (no install)
+
+Grab `automapper-<version>-win-x64.zip` from
+[Releases](https://github.com/izicoder/automapper/releases), extract it
+anywhere and double-click `automapper.exe`. Node.js, the converter and the web
+page are all inside that one file; nothing else has to be installed.
+
+- Double-click `automapper.exe` for the local web UI.
+- `automapper.exe convert` converts `INPUT\` into `OUTPUT\` without the UI.
+- `automapper.exe --help` shows the options.
+
+## From source
 
 ```
 npm install
 npm run convert                   # convert everything in INPUT/
 npm run convert -- --keys 4,10,18 # add automapped difficulties
 npm run ui                        # local web page on 127.0.0.1
+npm run build:exe                 # build/automapper.exe (needs Node 26)
 ```
 
-`launch.bat` does the same for a double-click: install, build, open the UI.
+`launch.bat` does the source route for a double-click: install, build, open
+the UI.
 
 Options: `--keys <list>` (1-18), `--min-hold-beats <n>`, `--roll-taps`,
 `--roll-subdivision <n>`, `--stop-emulation`, `--seed <n>`, `--verbose`.
@@ -38,6 +48,16 @@ also appended to `automapper.log` next to the program.
 
 `SPEC.txt` lists the remaining work (BMS/keysounds, `.dwi`) and the rules that
 still apply. `AGENTS.md` explains the repository layout and how to work in it.
+
+## Releasing
+
+`.github/workflows/release.yml` builds and publishes a release whenever the
+version in `package.json` has no tag yet. Bump the version, push to `master`,
+and the workflow typechecks, tests, builds the single executable, converts a
+fixture with it, and attaches
+`automapper-<version>-win-x64.zip` plus `SHA256SUMS.txt`. A new major number
+is titled "major release". Commits without a version bump publish nothing;
+`workflow_dispatch` with `force` rebuilds and replaces the assets.
 
 ## License
 

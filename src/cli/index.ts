@@ -5,6 +5,7 @@ import { appendToLogFile, prepareLogFile } from "../log-file.js";
 import { Logger } from "../log.js";
 import { discover } from "../package/layout.js";
 import { ensureInputDir, ensureOutputDir } from "../paths.js";
+import { isMainModule } from "../runtime.js";
 import { jobsFromDiscovery, runJobs } from "./jobs.js";
 import { CliError, parseArgs, USAGE } from "./options.js";
 import type { RunDirs, RunResult } from "./types.js";
@@ -83,6 +84,6 @@ function createCliLogger(): Logger {
 }
 
 // Only run when invoked directly, not when imported by tests.
-if (process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/"))) {
+if (isMainModule(import.meta.url)) {
   process.exitCode = main();
 }

@@ -2,6 +2,8 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { IN_SEA } from "./runtime.js";
+
 /**
  * Locates the application directory: the folder holding package.json (dev) or
  * the executable (packaged). Never process.cwd(), per spec section 4.
@@ -17,7 +19,20 @@ function findAppRoot(start: string): string {
   return dirname(process.execPath);
 }
 
-export const APP_ROOT = findAppRoot(dirname(fileURLToPath(import.meta.url)));
+/** Where this module lives; empty inside the packaged executable. */
+function moduleDir(): string {
+  try {
+    return dirname(fileURLToPath(import.meta.url));
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The packaged executable has no package.json next to it, so INPUT/ and
+ * OUTPUT/ go next to the .exe itself.
+ */
+export const APP_ROOT = IN_SEA ? dirname(process.execPath) : findAppRoot(moduleDir());
 
 /** INPUT/ sits next to the program (spec section 2.4). */
 export const INPUT_DIR = join(APP_ROOT, "INPUT");

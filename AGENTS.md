@@ -26,6 +26,11 @@ repository is laid out and how to work in it.
 - `npm run convert:built` — run the compiled CLI from `dist/`.
 - `npm run convert -- --keys 4,10,18` — CLI flags go after `--`.
 - `npm run convert -- --force` — unpack and convert archives again.
+- `npm run build:exe` — bundle everything into `build/automapper.exe` (Node 26
+  `--build-sea`); the asset the releases ship.
+- `scripts/make-release.ps1 -Version 1.0.0` — zip `build/automapper.exe`,
+  `LICENSE`, `NOTICE`, `README.txt` and an empty `INPUT/`/`OUTPUT/` into
+  `release/`, plus `SHA256SUMS.txt`.
 
 ## Testing
 
@@ -37,7 +42,8 @@ endpoints.
 
 Importing a generated `.osz` into osu! is a manual check; the writer is
 verified against the real file format instead (field counts, types, x
-positions, ordering).
+positions, ordering). The release workflow also converts a fixture with the
+packaged `.exe`, which covers the SEA paths that `npm test` cannot reach.
 
 ## UI
 
@@ -107,12 +113,50 @@ copy is deleted, so no unpacked duplicates are left behind.
 - `INPUT/` itself is never written to; archive contents live in the OS temp
   folder only while converting.
 
+## Packaged executable and releases
+
+Users get one file: `automapper.exe`. It is a Node single executable
+application (SEA) plus the code appended to a copy of `node.exe`, so nothing
+has to be installed.
+
+- `npm run build:exe` runs `scripts/build-sea.mjs`: esbuild bundles
+  `src/sea-main.ts` and `src/ui/worker.ts` into CommonJS, the page files and
+  the worker bundle become SEA assets, and `node --build-sea` writes
+  `build/automapper.exe`. Needs Node 26 to build; dev work stays on Node 22+.
+- `src/sea-main.ts` picks what runs: no argument or `ui` starts the UI,
+  `convert` and plain flags go to the CLI.
+- Inside the exe `src/runtime.ts` reports `IN_SEA`, `paths.ts` puts INPUT/ and
+  OUTPUT/ next to the `.exe`, the page is served from the bundled assets, and
+  the conversion worker is evaluated in a thread
+  (`new Worker(code, { eval: true, workerData })`) instead of loaded from disk.
+  `isMainModule()` is false there, so the module-level auto-run guards stay out
+  of the way.
+- `scripts/make-release.ps1` puts the exe, `LICENSE`, `NOTICE`, `README.txt`
+  and empty `INPUT/`/`OUTPUT/` into `release/automapper-<version>-win-x64.zip`
+  and writes `SHA256SUMS.txt`.
+
+`.github/workflows/release.yml` runs on every push to `master` and on demand:
+
+- Typecheck and tests must pass.
+- A release is published only when `package.json`'s version has no `v<version>`
+  tag. Bumping the version is therefore the "make a release" action; a new
+  major number gets the "major release" title. Commits without a bump publish
+  nothing.
+- Before publishing, it converts a fixture with the built `.exe` and fails if
+  no `.osz` appears, so a broken package cannot be released.
+- `workflow_dispatch` with `force` rebuilds and replaces the assets of the
+  current version's release.
+
 ## Layout
 
 ```
 src/
   paths.ts        App directory resolution: INPUT/ and OUTPUT/ sit next to the
                   program (never process.cwd()). All paths use `path`.
+  runtime.ts      IN_SEA / isMainModule / bundled asset lookup for the packaged
+                  single executable.
+  sea-main.ts     Entry point of the packaged .exe: no args or `ui` starts the
+                  UI, `convert` and flags go to the CLI.
   log.ts          Dependency-free logger. One line per event, context first.
   version.ts      CONVERTER_VERSION. Part of every content hash — bump it when
                   output generation changes.
@@ -167,7 +211,14 @@ test/             Vitest tests (`*.test.ts`) plus committed fixtures.
   temp.ts         Scratch folders for tests (under the temp directory).
 scripts/
   copy-ui-page.mjs Copies src/ui/page into dist/ after tsc.
+  build-sea.mjs    Bundles src/sea-main.ts and the worker with esbuild and
+                   packs them, plus the page files, into build/automapper.exe.
+  make-release.ps1 Stages build/automapper.exe (+ LICENSE, NOTICE, README.txt,
+                   empty INPUT/ and OUTPUT/) and zips it into release/.
   smoke-parse.ts   Manual parser scratch script.
+.github/workflows/release.yml
+                   Typecheck, tests, exe build, smoke conversion and a GitHub
+                   release whenever package.json has a version without a tag.
 launch.bat        Double-click entry: npm install, build, serve the UI.
 INPUT/            Everything to convert. Never modified by the tool. Git-ignored.
 OUTPUT/           Everything the tool produces. Git-ignored.

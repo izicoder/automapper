@@ -1,0 +1,153 @@
+name: Release
+
+# A release is cut when the version in package.json is one that has no tag
+# yet. Bump the version and push to master; a new major number is marked as a
+# major release. Ordinary commits without a version change build and test but
+# publish nothing.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild and replace the assets of the current version's release
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Read version and decide
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tag = "v$version"
+          $tags = git ls-remote --tags --refs origin "v*" |
+            ForEach-Object { ($_ -split "refs/tags/")[1] } |
+            Where-Object { $_ -match '^v\d+\.\d+\.\d+$' }
+
+          $exists = $tags -contains $tag
+          $major = $false
+          if (-not $exists) {
+            $previousMajor = ($tags |
+              ForEach-Object { [int]($_.Substring(1).Split('.')[0]) } |
+              Measure-Object -Maximum).Maximum
+            if ($null -eq $previousMajor -or [int]$version.Split('.')[0] -gt $previousMajor) {
+              $major = $true
+            }
+          }
+
+          $publish = (-not $exists) -or ('${{ inputs.force }}' -eq 'true')
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "major=$($major.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          "publish=$($publish.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          "exists=$($exists.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Host "version $tag, tag exists: $exists, major: $major, publish: $publish"
+
+      - name: Build the single executable
+        if: steps.version.outputs.publish == 'true'
+        run: npm run build:exe
+
+      - name: Smoke test the executable
+        if: steps.version.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          # The packaged .exe must convert a real chart with nothing else installed.
+          New-Item -ItemType Directory -Force build\INPUT\Song | Out-Null
+          Copy-Item test\fixtures\songs\zero-offset\* build\INPUT\Song\
+          & .\build\automapper.exe convert
+          if ($LASTEXITCODE -ne 0) { throw "the packaged exe exited with $LASTEXITCODE" }
+          $osz = Get-ChildItem build\OUTPUT -Filter *.osz -ErrorAction SilentlyContinue
+          if (-not $osz) { throw "the packaged exe wrote no .osz" }
+          Remove-Item build\INPUT, build\OUTPUT, build\automapper.log -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Package the zip
+        if: steps.version.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          ./scripts/make-release.ps1 -Version ${{ steps.version.outputs.version }} -Exe build/automapper.exe
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Version: ${{ steps.version.outputs.tag }}"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value (Get-Content release/SHA256SUMS.txt)
+
+      - name: Write release notes
+        id: notes
+        if: steps.version.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $previous = git describe --tags --abbrev=0 --match "v*" 2>$null
+          $range = if ($previous) { "$previous..HEAD" } else { "HEAD" }
+          $changes = (git log --pretty=format:"- %s" $range) -join "`n"
+
+          $lines = @(
+            "## Download",
+            "",
+            "automapper-$version-win-x64.zip - extract it anywhere and double-click automapper.exe.",
+            "Nothing to install: Node.js, the converter and the web page are inside that one file.",
+            "",
+            "- Double-click automapper.exe to open the local web UI.",
+            "- automapper.exe convert converts INPUT\ into OUTPUT\ without the UI.",
+            "- automapper.exe --help lists the options.",
+            "",
+            "Windows may warn about an unknown publisher; choose More info then Run anyway.",
+            "SHA256SUMS.txt is attached for verification.",
+            "",
+            "## Changes",
+            "",
+            $changes
+          )
+
+          $title = if ("${{ steps.version.outputs.major }}" -eq "true") { "v$version - major release" } else { "v$version" }
+          "title=$title" >> $env:GITHUB_OUTPUT
+          $lines -join "`n" | Set-Content -Path release-notes.md -Encoding utf8
+
+      - name: Publish the release
+        if: steps.version.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          $title = "${{ steps.notes.outputs.title }}"
+          $zip = "release/automapper-${{ steps.version.outputs.version }}-win-x64.zip"
+
+          if ("${{ steps.version.outputs.exists }}" -eq "true") {
+            # A forced rebuild of an already published version.
+            gh release upload $tag $zip release/SHA256SUMS.txt --clobber
+            gh release edit $tag --title $title --notes-file release-notes.md
+          } else {
+            gh release create $tag $zip release/SHA256SUMS.txt `
+              --target $env:GITHUB_SHA `
+              --title $title `
+              --notes-file release-notes.md `
+              --latest
+          }

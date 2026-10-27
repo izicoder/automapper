@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { extname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
@@ -22,6 +22,7 @@ import type { WorkerMessage, WorkerRequest } from "./protocol.js";
 import { scan, type ScanResult } from "./scan.js";
 import { DropStage } from "./stage.js";
 import { watchForChanges } from "./watch.js";
+import { IN_SEA, isMainModule, readBundled, readBundledText, readFrom } from "../runtime.js";
 
 /** Options as the form sends them: loose, strings allowed, validated below. */
 export type FormValues = Record<string, unknown>;
@@ -52,7 +53,7 @@ export interface UiServer {
   /** Current staging folder, or null when nothing was dropped. */
   stageDir(): string | null;
   close(): Promise<void>;
-}const PAGE_DIR = fileURLToPath(new URL("./page/", import.meta.url));
+}const PAGE_DIR = IN_SEA ? "" : fileURLToPath(new URL("./page/", import.meta.url));
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -342,21 +343,30 @@ export function startUiServer(options: UiServerOptions): Promise<UiServer> {
   }
 
   function servePage(res: ServerResponse, name: string): void {
+    // The packaged executable carries the page inside itself (spec 7).
+    const bundled = readBundled(`page/${name}`);
+    if (bundled !== undefined) {
+      return sendPage(res, name, bundled);
+    }
+
     const target = join(PAGE_DIR, name);
     if (!target.startsWith(PAGE_DIR.endsWith(sep) ? PAGE_DIR : `${PAGE_DIR}${sep}`)) {
       return json(res, 404, { error: "not found" });
     }
-    try {
-      const body = readFileSync(target);
-      res.writeHead(200, {
-        "content-type": MIME[extname(target).toLowerCase()] ?? "application/octet-stream",
-        "content-length": body.byteLength,
-        "cache-control": "no-store",
-      });
-      res.end(body);
-    } catch {
-      json(res, 404, { error: `missing page asset ${name}` });
+    const body = readFrom(PAGE_DIR, name);
+    if (body === undefined) {
+      return json(res, 404, { error: `missing page asset ${name}` });
     }
+    return sendPage(res, name, body);
+  }
+
+  function sendPage(res: ServerResponse, name: string, body: Buffer): void {
+    res.writeHead(200, {
+      "content-type": MIME[extname(name).toLowerCase()] ?? "application/octet-stream",
+      "content-length": body.byteLength,
+      "cache-control": "no-store",
+    });
+    res.end(body);
   }
 
   const server = createServer((req, res) => {
@@ -446,11 +456,28 @@ function workerRunner(
   request: WorkerRequest,
   onMessage: (message: WorkerMessage) => void,
 ): Promise<void> {
+  // In the packaged executable the worker script is an asset, not a file, so
+  // it is evaluated in the new thread instead of loaded from disk.
+  const bundledWorker = readBundledText("worker.cjs");
+  if (bundledWorker !== undefined) {
+    return collectMessages(
+      new Worker(bundledWorker, { eval: true, workerData: request }),
+      onMessage,
+    );
+  }
+
   const workerPath = fileURLToPath(new URL("./worker.js", import.meta.url));
   if (!existsSync(workerPath)) return inlineRunner(request, onMessage);
 
+  return collectMessages(new Worker(workerPath, { workerData: request }), onMessage);
+}
+
+/** Resolves when the worker reports done, rejects when it breaks. */
+function collectMessages(
+  worker: Worker,
+  onMessage: (message: WorkerMessage) => void,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(workerPath, { workerData: request });
     let settled = false;
 
     worker.on("message", (message: WorkerMessage) => {
@@ -538,7 +565,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   process.on("SIGTERM", stop);
 }
 
-if (process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/"))) {
+if (isMainModule(import.meta.url)) {
   void main().catch((error: unknown) => {
     const message = (error as Error).message;
     process.stderr.write(`${message}\n`);
