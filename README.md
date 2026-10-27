@@ -18,7 +18,8 @@ Source charts may use any key count; the output is always mapped to a legal
 osu!mania count (1K-18K), using the closest one when the source is outside
 that range.
 
-`SPEC.txt` holds the requirements. `AGENTS.md` explains the repository layout.
+`SPEC.txt` lists the remaining work (BMS/keysounds, `.dwi`, UI) and the rules
+that still apply. `AGENTS.md` explains the repository layout.
 
 ## License
 

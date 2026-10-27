@@ -7,8 +7,11 @@ A universal osu!mania converter and automapper. It reads rhythm-game charts
 representation (IR), optionally remaps the key count, and writes osu!mania
 beatmaps packed as `.osz`.
 
-The full requirements live in `SPEC.txt`. **`SPEC.txt` is read-only.** Never
-edit it unless the owner explicitly asks. This file only records how the
+The repository has finished spec v1 (StepMania + automapper, 1K-18K).
+`SPEC.txt` now lists only the remaining work (BMS/keysounds, `.dwi`, UI) plus
+the rules that still apply. **`SPEC.txt` is read-only.** Never edit it unless
+the owner explicitly asks; when a spec item is finished, remove it from the
+spec in the same commit that finishes it. This file records how the
 repository is laid out and how to work in it.
 
 ## Commands
@@ -19,6 +22,17 @@ repository is laid out and how to work in it.
 - `npm run build` — emit JavaScript to `dist/`.
 - `npm run convert` — run the CLI from source with `tsx`.
 - `npm run convert:built` — run the compiled CLI from `dist/`.
+- `npm run convert -- --keys 4,10,18` — CLI flags go after `--`.
+
+## Testing
+
+`npm test` covers timing and offsets (1 ms tolerance), per-chart `.ssc`
+timing, note mapping, the written `.osu` structure, naming and idempotence,
+pack discovery, encodings, CLI end to end, and the automapper across 1K-18K.
+
+Importing a generated `.osz` into osu! is a manual check; the writer is
+verified against the real file format instead (field counts, types, x
+positions, ordering).
 
 ## Layout
 
@@ -57,17 +71,25 @@ src/
     options.ts    Argument parsing and the usage text.
     index.ts      run(): discovery -> parse -> package, one log line per event.
 test/             Vitest tests (`*.test.ts`) plus committed fixtures.
-  fixtures/songs/ One folder per source-edge fixture, loaded by the parser tests.
-  fixtures/packs/ One pack fixture: same-title songs plus a deliberately broken one.
+  fixtures/songs/ One folder per source-edge fixture: offsets, BPM change and
+                  stop, note types, per-chart .ssc timing, audio fallback,
+                  unknown step type, Shift-JIS encoding, 7K source.
+  fixtures/packs/ One pack fixture: two same-title songs (collision), plus a
+                  missing-audio song and a bad-encoding song to prove a pack
+                  keeps going.
   osu-format.ts   Tiny .osu reader used by the writer and package tests.
+  temp.ts         Scratch folders for tests (under the temp directory).
 INPUT/            Everything to convert. Never modified by the tool. Git-ignored.
 OUTPUT/           Everything the tool produces. Git-ignored.
 ```
 
+`.gitattributes` marks the Shift-JIS and bad-encoding fixtures as `-text` so
+git never rewrites their bytes.
+
 ## Status
 
-Done: StepMania parsing, timing, IR, osu writer, .osz packaging, automapper
-(1K-18K, ported from rizu), stop emulation, roll-as-taps, CLI, tests.
+Spec v1 is done; see `SPEC.txt` section 0 and the tests. Remaining work is
+listed in `SPEC.txt` (BMS/keysounds, .dwi, UI).
 
 Automapper specifics:
 
@@ -82,8 +104,7 @@ Automapper specifics:
   legal count and logged. `--keys` only accepts 1K-18K, and every written
   difficulty is legal (`src/keys.ts`, enforced by the writer).
 
-Not done yet: BMS input and keysounds (spec v1.1), UI (spec v1.1), separate
-.osz per automapped difficulty (allowed by spec section 5, not asked for yet).
+Not done yet: BMS input and keysounds, .dwi input, UI (all spec v1.1).
 Scratch lanes and rizu's other modifiers are out of scope.
 
 Spec deviations, on purpose:
@@ -120,8 +141,12 @@ and attribution are in `NOTICE`.
 - Every parser guess (encoding, audio fallback, skipped chart) goes into
   `Song.warnings` and gets logged.
 - Fixtures are small hand-written charts committed under `test/fixtures/`.
+  Binary-sensitive fixtures (Shift-JIS, bad encoding) are marked `-text` in
+  `.gitattributes`; never let an editor rewrite their bytes.
   `INPUT/`, `OUTPUT/`, `dist/`, `node_modules/` and `*.zip`/`*.osz` are
   git-ignored.
+- Never commit a converted pack or a source zip; they belong in `INPUT/` or
+  `OUTPUT/`, both ignored.
 
 ## Git
 

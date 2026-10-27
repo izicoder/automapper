@@ -1,6 +1,18 @@
 UNIVERSAL OSU!MANIA CONVERTER & AUTOMAPPER - SPEC
-Version 2 (rewrite)
+Version 3 (v1 implemented; this file lists what is left)
 Target format: osu!mania (.osu inside .osz)
+
+
+0. V1 IS DONE
+-------------
+Implemented and covered by tests: StepMania .sm/.ssc input, exact timing
+(offset, BPM changes, stops, delays, warps per chart), IR, osu!mania writer,
+.osz packaging, collision-proof naming, note type mapping, stop emulation,
+roll-as-taps, loose files in INPUT/, unknown-step-type override, and the
+automapper for 1K-18K (ported from rizu vsrg).
+
+How it works is recorded in AGENTS.md, the tests and git history. This file
+no longer repeats implemented requirements. Do not re-add them.
 
 
 1. GOAL
@@ -29,174 +41,52 @@ existing converters and the main reason this tool exists.
 7. INPUT/ is never modified or deleted by the tool.
 
 
-3. V1 SCOPE
------------
-- StepMania input: .sm and .ssc (both in v1).
-- Basic automapper (key count N to M), logic borrowed from rizu vsrg
-  (https://github.com/semyon422/rizu). Check rizu's license before copying
-  any code. If it is incompatible, reimplement the ideas only.
-- Correct offset and timing handling (section 6).
-- Single songs and song packs.
-- Output is always .osz, whatever the input format.
-- Collision-proof naming (section 7).
-- Note type mapping (section 8).
+3. REMAINING SCOPE
+------------------
+V1.1:
+- BMS/BME/BML/PMS input with keysounds.
+- .dwi input.
+- UI.
 
-V1.1: BMS/BME/BML/PMS input with keysounds, .dwi, UI. The internal model
-(section 4) must already support BMS needs, so v1.1 is a new parser, not a
-rewrite.
+Carried over from v1 as a known gap (see AGENTS.md "Spec deviations"):
+- The automapper has no density, jack-tolerance or chord-limit parameters.
+  The rizu port runs with rizu's fixed behaviour.
+- Automapped difficulties share one .osz with the source difficulties.
+  Writing them as separate .osz files is not implemented.
 
 Out of scope for now: non-mania osu modes, audio editing, storyboard
-conversion, online upload.
+conversion, online upload. Scratch lanes and rizu's other modifiers.
 
 
-4. ARCHITECTURE
----------------
+4. ARCHITECTURE CONSTRAINTS FOR NEW WORK
+----------------------------------------
 Pipeline: parse -> IR -> (optional transform: automapper) -> osu writer ->
 osz packager.
 
-IR (intermediate representation):
-- Metadata: title, artist, creator, subtitle, source charts, audio file,
-  preview point, background, banner.
-- Tempo map: BPM changes, stops, delays, warps, stored in beats (exact,
-  rational or high precision).
-- Charts: each has key count, difficulty label, note list.
-- Note: column, start (beat and absolute ms), optional end (for holds),
-  kind, optional keysound reference.
-- Background/keysound events: sample plays not tied to a column (BMS BGM
-  channel).
+The IR already reserves what BMS needs; v1.1 is a new parser, not a rewrite:
+- Note: column, start (beat and absolute ms), optional end, kind, optional
+  keysound reference.
+- Background/keysound events: samples not tied to a column (BGM channel).
+- Charts own their tempo map, including offset, stops, delays and warps.
 
-Absolute time is computed once from beats and the tempo map at full
-precision. Rounding to integer ms happens only in the writer, per note,
-never accumulated.
-
-Modules: parsers/ (one per format), ir/, transform/ (automapper), osu/
-(writer), package/ (osz and folder layout), cli/, later ui/. Parsers never
-know about osu. The writer never knows about source formats.
-
-Stack: Node.js with TypeScript in strict mode, CLI first. "Next to the
-program" means the directory of the app (packaged executable or entry
-script), resolved at startup, never process.cwd(). Paths are built with
-"path", never string concatenation, so Windows and Linux behave the same.
-The UI framework is chosen when UI work starts.
+Rules that stay true for every new parser:
+- Parsers never know about osu. The writer never learns about source formats.
+- Beats are exact until they leave the IR; absolute ms is computed once from
+  the tempo map at full precision. Rounding to whole ms happens only in the
+  writer, per note.
+- A bad song is skipped with a log line; it never aborts a pack.
+- Every parser guess (encoding, audio fallback, skipped chart) goes into
+  `Song.warnings` and is logged.
+- Paths are built with "path", never string concatenation. "Next to the
+  program" means the app directory, resolved at startup, never process.cwd().
+- Stack: Node.js with TypeScript in strict mode, CLI first. The UI framework
+  is chosen when UI work starts.
 
 
-5. INPUT AND OUTPUT LAYOUT
+5. BMS NOTE MAPPING (V1.1)
 --------------------------
-Detection: a folder containing a chart file (.sm/.ssc, later BMS) is a SONG.
-A folder containing song folders is a PACK. Maximum depth is two layers.
+osu!mania has only taps (type 1) and holds (type 128). BMS sources:
 
-  INPUT/
-    SongA/              (song: chart + audio)
-    PackX/
-      Song1/
-      Song2/
-
-  OUTPUT/
-    SongA.osz           (single song: one osz)
-    PackX/              (pack: folder, then one osz per song)
-      Song1.osz
-      Song2.osz
-
-- One song becomes one .osz containing all difficulties of that song, with
-  all assets (audio, background, keysounds).
-- Automapped difficulties are added to the same osz as extra difficulties,
-  or written as separate osz files if the user asks for that. Either way
-  they land in OUTPUT/.
-- Loose files dropped directly into INPUT/ are treated as a one-file song.
-- Unsupported or broken songs are skipped with a clear log line. One bad
-  song never aborts a whole pack.
-
-StepMania chart types and key counts
-Each StepMania chart declares a type that decides the osu key count.
-Unknown types are skipped with a log line unless the user overrides the
-key count.
-
-  dance-single   4
-  pump-single    5
-  dance-solo     6
-  dance-double   8
-  pump-double    10
-
-Encoding and damaged files
-Old .sm files are often Shift-JIS or mixed encodings, or point #MUSIC at a
-missing file. The parser detects the encoding, and if the audio is missing
-it falls back to the only audio file in the song folder. Every guess is
-logged. If no audio can be found, the song is skipped.
-
-
-6. TIMING AND OFFSET (CRITICAL)
--------------------------------
-StepMania #OFFSET is in seconds. Beat 0 occurs at -OFFSET seconds in the
-audio. Therefore the first uninherited timing point is at
-time_ms = -OFFSET * 1000, which can be negative and must be written as is.
-Do not clamp it to 0 and do not shift notes to hide it.
-
-Rules:
-- Compute each note time from the tempo map, including BPM changes, stops
-  and delays, in full precision, then round once.
-- Write one uninherited timing point per BPM change with
-  beatLength = 60000 / bpm at full precision (osu stores floats).
-- Stops: notes use absolute time, so they land correctly. For visual
-  behaviour, optionally emulate the pause with a near-zero SV inherited
-  point. This is a setting.
-- Do not apply any global audio offset compensation (ITG 9ms style) unless
-  the user sets it explicitly.
-- Audio encoding: prefer copying the source audio untouched. If transcoding
-  is ever needed (e.g. to ogg), account for decoder padding/delay of the
-  source format and keep the chart aligned. Never silently re-encode.
-- Preview time, AudioLeadIn and the first-note timing must be consistent
-  with the offset above.
-- Verification: add an automated test that converts a reference chart with
-  a known offset, parses the output, and asserts the first note and a late
-  note land within 1 ms of the expected time. Include charts with BPM
-  changes and stops.
-
-.ssc timing: .ssc charts can carry their own #OFFSET, BPMs, stops and
-delays. The tempo map and offset therefore belong to the chart, not the
-song, and .sm is treated the same way (every chart in an .sm simply shares
-one tempo map). One osz can then contain charts with different timing, each
-with its own timing points.
-
-
-7. NAMING AND COLLISION AVOIDANCE
----------------------------------
-Osu identifies maps by content hash, but many players and tools also group
-by title, artist and difficulty name, so identical-looking names collide on
-import.
-
-- Every difficulty gets a short hash in its Version field, e.g.
-  "4K Challenge #a1b2c3".
-- The hash is deterministic: first 6 hex chars of SHA-256 over (source
-  chart bytes, converter version, conversion and automapper settings,
-  target key count).
-- The .osz filename also includes a hash suffix, e.g.
-  "Artist - Title [a1b2c3].osz".
-- Same song converted twice with the same settings gives the same output
-  (idempotent). Different settings or a different source gives a different
-  hash.
-- Set BeatmapID to 0 and BeatmapSetID to -1 so nothing claims to be an
-  online map.
-- Strip characters illegal in filenames. Keep unicode titles in
-  TitleUnicode / ArtistUnicode.
-
-
-8. NOTE TYPE MAPPING
---------------------
-Osu!mania has only two note types: tap (type 1) and hold/LN (type 128 with
-an end time). Anything else must be converted or dropped by an explicit
-rule.
-
-StepMania:
-  Tap (1)               -> Tap
-  Hold (2..3)           -> LN
-  Roll (4..3)           -> LN (default). Option: series of taps at a
-                           configurable subdivision
-  Mine (M)              -> Dropped
-  Fake (F)              -> Dropped
-  Lift (L)              -> Tap
-  Keysound note (K)     -> Tap with keysound if present, otherwise dropped
-
-BMS (v1.1):
   Normal note (channels 11-19)                  -> Tap
   LNTYPE 1 / 2 pairs, LNOBJ, channels 51-59     -> LN
   Charge note / hell charge note / backspin
@@ -204,7 +94,7 @@ BMS (v1.1):
   Invisible (31-39), landmine (D1-E9)           -> Dropped
   BGM channel (01)                              -> Background sample events
 
-Edge rules:
+Edge rules (already implemented for StepMania, reuse them):
 - Zero-length or negative-length holds become taps.
 - Overlapping holds in the same column are trimmed so the next note starts
   after the previous one ends.
@@ -212,92 +102,56 @@ Edge rules:
   becomes a tap).
 
 
-9. KEYSOUNDS
-------------
+6. KEYSOUNDS (V1.1)
+-------------------
 - Per-note sounds: write the sample filename in the hit object's hitSample
-  extras (normalSet:additionSet:index:volume:filename), and copy the
-  sample into the osz.
-- Unattached sounds (BMS BGM): write sample events in [Events] at the
-  correct absolute ms.
+  extras (normalSet:additionSet:index:volume:filename), and copy the sample
+  into the osz.
+- Unattached sounds (BMS BGM): write sample events in [Events] at the correct
+  absolute ms.
 - Deduplicate identical sample files by hash.
 - When the automapper removes or merges notes, their keysounds must not be
   lost. Move them to background sample events at the same time.
+- Audio encoding: copy the source audio untouched. If transcoding is ever
+  needed (e.g. to ogg), account for decoder padding/delay of the source
+  format and keep the chart aligned. Never silently re-encode.
 
 
-10. AUTOMAPPER (V1 BASIC)
--------------------------
-Input: any key count N. Output: any key count M. Includes the identity case
-(N = M) as plain conversion.
-
-Reduce (N > M):
-- Merge columns using a mapping that preserves left/right hand layout
-  (mirror-aware, edge columns kept).
-- Collapse chords that would exceed M, preferring to keep notes that align
-  with strong beats.
-- Avoid creating jacks or overlapping holds that were not in the source.
-
-Expand (N < M):
-- Spread columns across the wider field, then add notes only where density
-  permits (e.g. mirrored or offset duplicates on strong beats).
-- Never invent notes in sparse sections. Keep the pattern readable.
-
-Always:
-- Holds keep their duration. Every note keeps its absolute time.
-- Output is deterministic for a fixed seed. The seed is part of the
-  settings hash (section 7).
-- Algorithm details come from rizu vsrg's key-conversion logic. The
-  implementation exposes parameters (density, jack tolerance, chord limit)
-  rather than hardcoding them.
-
-
-11. CLI
--------
-- "converter" with no arguments: convert everything in INPUT/ to OUTPUT/.
-- "converter --keys 4" (or a list, e.g. --keys 4,7): also generate
-  automapped difficulties.
-- Options for roll handling, stop emulation, minimum LN length, seed.
-- Exit codes and log output must make partial failures obvious.
-
-
-12. UI (LATER)
---------------
+7. UI (V1.1)
+------------
 Drag and drop area. Dropped files and folders are copied into INPUT/,
-converted, and the results appear in OUTPUT/. The UI offers the same
-options as the CLI and a button to open OUTPUT/. It must not introduce any
-other storage path.
+converted, and the results appear in OUTPUT/. The UI offers the same options
+as the CLI and a button to open OUTPUT/. It must not introduce any other
+storage path.
 
 
-13. ACCEPTANCE FOR V1
----------------------
-1. A single StepMania song (.sm or .ssc) in INPUT/ yields one valid .osz in
-   OUTPUT/ that imports into osu! with correct timing.
-2. A StepMania pack yields OUTPUT/<Pack>/<Song>.osz per song.
-3. Re-running gives identical files. Converting the same song with
-   different settings gives non-colliding names.
-4. Offset test (section 6) passes, including negative offsets and BPM
-   changes.
-5. Automapper converts a 4K and a 7K chart to other key counts with holds
-   and timing intact.
-6. AGENTS.md exists and matches the repository. History is committed.
+8. ACCEPTANCE FOR V1.1
+----------------------
+1. A BMS song with keysounds in INPUT/ yields one .osz with the notes, the
+   per-note samples and the BGM sample events at the right absolute times.
+2. A .dwi song converts like a StepMania song.
+3. The UI copies dropped files/folders into INPUT/, converts with the CLI
+   options, and opens OUTPUT/. No second storage location exists.
+4. Every v1 test still passes; new formats have their own fixtures.
+5. AGENTS.md matches the repository and the work is committed.
 
-Test fixtures (committed, double as regression tests):
-- Negative offset, positive offset, and zero offset.
-- A BPM change mid-song and a stop.
-- A chart with holds and rolls.
-- A pack with two songs sharing the same title and artist (collision
-  test).
-- A deliberately broken song (missing audio, bad encoding) inside a pack,
-  to prove it does not abort the pack.
+Test fixtures for v1.1 (committed, double as regression tests):
+- BMS with normal notes, LNTYPE 1/2, LNOBJ and a BGM channel.
+- BMS with a missing sample and a sample shared by two notes.
+- A .dwi chart with holds.
 
 
-14. DECISIONS AND OPEN ITEMS
-----------------------------
+9. DECISIONS AND OPEN ITEMS
+---------------------------
 Decided:
 - Language: Node.js with TypeScript.
-- .ssc is in v1 together with .sm.
-- Rolls default to LN. The tap-series option stays available.
+- .ssc is handled together with .sm.
+- Rolls default to LN; the tap-series option stays available.
+- rizu vsrg is GPL-3.0; the key-count conversion is ported from it and this
+  project is GPL-3.0. Attribution is in NOTICE.
+- osu!mania key counts run 1K-18K. Source charts outside that range are
+  automapped to the closest legal count; --keys only accepts 1K-18K.
+- The automapper exposes no density/jack/chord settings (rizu has none).
 
 Open:
-- Confirm rizu's license and which of its modules the automapper borrows.
-  If the license is incompatible with this project (for example a copyleft
-  license), reimplement the ideas without copying code.
+- None for v1. BMS, .dwi and the UI are the remaining work.
